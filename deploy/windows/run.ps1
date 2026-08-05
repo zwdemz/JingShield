@@ -2,7 +2,7 @@
 param(
     [string]$InstallRoot = "$env:ProgramData\JingShield",
     [switch]$Initialize,
-    [string]$Username = 'admin'
+    [string]$Username
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +36,8 @@ if (-not (Test-Path -LiteralPath $cert) -or -not (Test-Path -LiteralPath $key)) 
 & $exe migrate -c $config
 if ($LASTEXITCODE -ne 0) { throw '数据库迁移失败。' }
 if ($Initialize) {
+    if (-not $Username) { $Username = Read-Host '请输入初始管理员用户名' }
+    if ($Username -notmatch '^[A-Za-z0-9_.-]{3,50}$') { throw '管理员用户名格式无效。' }
     & $exe init -c $config --username $Username
     if ($LASTEXITCODE -ne 0) { throw '管理员初始化失败。' }
 }
@@ -53,4 +55,3 @@ Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 2
 $task = Get-ScheduledTask -TaskName $taskName
 Write-Host "JingShield 已启动，计划任务状态：$($task.State)" -ForegroundColor Green
-

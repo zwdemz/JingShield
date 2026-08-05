@@ -77,19 +77,29 @@ var schemaMigrations = []migration{
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='IP 黑白名单'`},
 	{"jyj_attack_log", `CREATE TABLE IF NOT EXISTS jyj_attack_log (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  event_id VARCHAR(40) NULL COMMENT '客户端拦截事件编号',
   ip VARCHAR(64) NOT NULL,
   ip_location VARCHAR(255) NULL,
   host VARCHAR(255) NULL,
   uri VARCHAR(500) NULL,
   method VARCHAR(10) NULL,
   attack_type VARCHAR(50) NOT NULL,
+  severity TINYINT NOT NULL DEFAULT 1 COMMENT '1=信息 2=低危 3=中危 4=高危 5=严重',
   attack_detail VARCHAR(500) NULL,
+  request_packet MEDIUMTEXT NULL,
   attack_count INT NOT NULL DEFAULT 0,
   status TINYINT NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id), KEY idx_ip_created_at (ip, created_at),
-  KEY idx_attack_type (attack_type), KEY idx_created_at (created_at)
+  PRIMARY KEY (id), KEY idx_event_id (event_id), KEY idx_ip_created_at (ip, created_at),
+  KEY idx_attack_type_created (attack_type, created_at),
+  KEY idx_attack_severity_created (severity, created_at), KEY idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='攻击日志'`},
+	{"jyj_attack_event_ref", `CREATE TABLE IF NOT EXISTS jyj_attack_event_ref (
+  event_id VARCHAR(40) NOT NULL,
+  attack_log_id BIGINT UNSIGNED NOT NULL,
+  occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (event_id), KEY idx_attack_log_id (attack_log_id), KEY idx_event_occurred_at (occurred_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='攻击事件编号索引'`},
 	{"jyj_access_log", `CREATE TABLE IF NOT EXISTS jyj_access_log (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   ip VARCHAR(64) NOT NULL,
@@ -155,11 +165,15 @@ var schemaMigrations = []migration{
   ('cc_verification_mode', '1', '验证模式 1-8'),
   ('xss_protection_status', '1', 'XSS 防护开关'),
   ('sql_protection_status', '1', 'SQL 注入防护开关'),
+  ('path_traversal_protection_status', '1', '路径穿越防护开关'),
+  ('ssrf_protection_status', '1', 'SSRF 防护开关'),
+  ('xxe_protection_status', '1', 'XXE/XML 注入防护开关'),
   ('file_check_status', '0', '文件校验开关'),
   ('oversea_ip_status', '0', '海外 IP 拦截开关'),
   ('log_keep_days', '30', '日志保留天数'),
   ('error_output_format', 'json', '错误输出格式 json/html'),
   ('custom_error_page', '', '自定义错误页模板'),
+	('security_contact', '网站安全管理员', '拦截页联系信息'),
 	('api_enabled', '1', '设备联动 API 开关'),
 	('alert_cpu_percent', '80', 'CPU 使用率告警阈值'),
 	('alert_memory_percent', '85', '内存使用率告警阈值'),
@@ -188,29 +202,81 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("执行迁移 %s 失败: %w", m.name, err)
 		}
 	}
-	if err := ensureColumn(ctx, db, "jyj_users", "must_change_password",
+	if _, err := ensureColumn(ctx, db, "jyj_users", "must_change_password",
 		"ALTER TABLE jyj_users ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 1 AFTER status"); err != nil {
 		return err
 	}
-	if err := ensureColumn(ctx, db, "jyj_sites", "tls_skip_verify",
+	if _, err := ensureColumn(ctx, db, "jyj_sites", "tls_skip_verify",
 		"ALTER TABLE jyj_sites ADD COLUMN tls_skip_verify TINYINT(1) NOT NULL DEFAULT 0 AFTER pass_host"); err != nil {
 		return err
+	}
+	severityAdded, err := ensureColumn(ctx, db, "jyj_attack_log", "severity",
+		"ALTER TABLE jyj_attack_log ADD COLUMN severity TINYINT NOT NULL DEFAULT 1 COMMENT '1=信息 2=低危 3=中危 4=高危 5=严重' AFTER attack_type")
+	if err != nil {
+		return err
+	}
+	if _, err := ensureColumn(ctx, db, "jyj_attack_log", "request_packet",
+		"ALTER TABLE jyj_attack_log ADD COLUMN request_packet MEDIUMTEXT NULL AFTER attack_detail"); err != nil {
+		return err
+	}
+	if _, err := ensureColumn(ctx, db, "jyj_attack_log", "event_id",
+		"ALTER TABLE jyj_attack_log ADD COLUMN event_id VARCHAR(40) NULL COMMENT '客户端拦截事件编号' AFTER id"); err != nil {
+		return err
+	}
+	if severityAdded {
+		_, err = db.ExecContext(ctx, `UPDATE jyj_attack_log SET severity = CASE
+  WHEN attack_type IN ('SQL注入', '穿盾攻击') THEN 5
+  WHEN attack_type IN ('XSS攻击', 'IP黑名单') THEN 4
+  WHEN attack_type IN ('CC攻击') OR (attack_type = '自定义策略' AND status = 1) THEN 3
+  WHEN attack_type IN ('海外IP拦截', '验证失败次数过多') THEN 2
+  ELSE 1 END`)
+		if err != nil {
+			return fmt.Errorf("回填攻击事件严重度失败: %w", err)
+		}
+	}
+	for _, index := range []struct {
+		name, sql string
+	}{
+		{"idx_ip_created_at", "ALTER TABLE jyj_attack_log ADD INDEX idx_ip_created_at (ip, created_at)"},
+		{"idx_event_id", "ALTER TABLE jyj_attack_log ADD INDEX idx_event_id (event_id)"},
+		{"idx_attack_type_created", "ALTER TABLE jyj_attack_log ADD INDEX idx_attack_type_created (attack_type, created_at)"},
+		{"idx_attack_severity_created", "ALTER TABLE jyj_attack_log ADD INDEX idx_attack_severity_created (severity, created_at)"},
+	} {
+		if err := ensureIndex(ctx, db, "jyj_attack_log", index.name, index.sql); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func ensureColumn(ctx context.Context, db *sql.DB, table, column, alterSQL string) error {
+func ensureColumn(ctx context.Context, db *sql.DB, table, column, alterSQL string) (bool, error) {
 	var count int
 	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.COLUMNS
 		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`, table, column).Scan(&count)
 	if err != nil {
-		return fmt.Errorf("检查字段 %s.%s 失败: %w", table, column, err)
+		return false, fmt.Errorf("检查字段 %s.%s 失败: %w", table, column, err)
+	}
+	if count > 0 {
+		return false, nil
+	}
+	if _, err := db.ExecContext(ctx, alterSQL); err != nil {
+		return false, fmt.Errorf("新增字段 %s.%s 失败: %w", table, column, err)
+	}
+	return true, nil
+}
+
+func ensureIndex(ctx context.Context, db *sql.DB, table, index, alterSQL string) error {
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`, table, index).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("检查索引 %s.%s 失败: %w", table, index, err)
 	}
 	if count > 0 {
 		return nil
 	}
 	if _, err := db.ExecContext(ctx, alterSQL); err != nil {
-		return fmt.Errorf("新增字段 %s.%s 失败: %w", table, column, err)
+		return fmt.Errorf("新增索引 %s.%s 失败: %w", table, index, err)
 	}
 	return nil
 }

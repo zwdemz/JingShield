@@ -2,7 +2,6 @@ package policy
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
@@ -54,7 +53,7 @@ func TestBundledJavaEmergencyPack(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pack RulePack
-	if err := json.Unmarshal(raw, &pack); err != nil {
+	if err := decodeStrictJSON(raw, &pack); err != nil {
 		t.Fatal(err)
 	}
 	if pack.Schema != "jingshield.rules/v1" || pack.Version != "java-emergency-2026h1.1" || len(pack.Rules) != 11 {
@@ -76,5 +75,32 @@ func TestBundledJavaEmergencyPack(t *testing.T) {
 	partialPUT := regexp.MustCompile(pack.Rules[7].Pattern)
 	if !partialPUT.MatchString("/upload\nPUT\n\nbody\nContent-Range: bytes 0-9/10") {
 		t.Fatal("partial PUT rule did not match the normalized request sample")
+	}
+}
+
+func TestDecodeStrictJSONRejectsTypeMetadataAndTrailingValues(t *testing.T) {
+	for _, raw := range []string{
+		`{"schema":"jingshield.rules/v1","version":"v1","rules":[],"$type":"System.Diagnostics.Process"}`,
+		`{"schema":"jingshield.rules/v1","version":"v1","rules":[]} {}`,
+		`{"schema":"jingshield.rules/v1","version":"v1","rules":[{"name":"test","category":"test","target":"uri","pattern":"x","action":1,"enabled":true,"priority":1,"description":"","__proto__":{}}]}`,
+	} {
+		var pack RulePack
+		if err := decodeStrictJSON([]byte(raw), &pack); err == nil {
+			t.Errorf("accepted unsafe JSON: %s", raw)
+		}
+	}
+}
+
+func TestImportRejectsEmptyDuplicateAndUnsafeVersion(t *testing.T) {
+	valid := RuleInput{Name: "rule", Category: "test", Target: "uri", Pattern: "x", Action: ActionBlock, Enabled: true, Priority: 1}
+	service := new(Service)
+	for _, pack := range []RulePack{
+		{Schema: "jingshield.rules/v1", Version: "v1"},
+		{Schema: "jingshield.rules/v1", Version: "v1\nforged", Rules: []RuleInput{valid}},
+		{Schema: "jingshield.rules/v1", Version: "v1", Rules: []RuleInput{valid, valid}},
+	} {
+		if _, err := service.Import(context.Background(), pack, "import"); err == nil {
+			t.Errorf("accepted unsafe rule pack: %+v", pack)
+		}
 	}
 }

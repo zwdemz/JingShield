@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -66,5 +67,37 @@ func TestReverseForAllowsExplicitSelfSignedTLSOrigin(t *testing.T) {
 	transport, ok := rp.Transport.(*http.Transport)
 	if !ok || transport.TLSClientConfig == nil || !transport.TLSClientConfig.InsecureSkipVerify {
 		t.Fatal("explicit self-signed TLS option was not applied")
+	}
+}
+
+func TestReverseProxyRewritesOnlyPublicSameOriginForPrivateUpstream(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		origin     string
+		wantOrigin string
+	}{
+		{name: "same origin", origin: "https://waf.example:18443", wantOrigin: "https://127.0.0.1:8080"},
+		{name: "foreign origin", origin: "https://attacker.example", wantOrigin: "https://attacker.example"},
+		{name: "null origin", origin: "null", wantOrigin: "null"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rp, err := newReverseProxy("https://127.0.0.1:8080", false, true, 10, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := &http.Request{
+				Host:   "waf.example:18443",
+				URL:    &url.URL{Path: "/login"},
+				Header: http.Header{"Origin": {test.origin}},
+				TLS:    &tls.ConnectionState{},
+			}
+			rp.Director(req)
+			if got := req.Header.Get("Origin"); got != test.wantOrigin {
+				t.Fatalf("Origin = %q, want %q", got, test.wantOrigin)
+			}
+			if req.Host != "127.0.0.1:8080" {
+				t.Fatalf("Host = %q", req.Host)
+			}
+		})
 	}
 }

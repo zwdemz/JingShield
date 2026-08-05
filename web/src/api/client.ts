@@ -57,3 +57,29 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
 export function jsonBody(value: unknown): RequestInit {
   return { body: JSON.stringify(value) }
 }
+
+export async function apiDownload(path: string): Promise<{ blob: Blob; filename: string }> {
+  let response: Response
+  try {
+    response = await fetch(`${API_PREFIX}${path}`, {
+      method: 'GET',
+      headers: { Accept: 'text/csv' },
+      credentials: 'include',
+    })
+  } catch {
+    throw new APIError('无法连接到鲸盾服务，请检查服务状态', -1, 0)
+  }
+  if (!response.ok) {
+    let message = '日志导出失败'
+    let code = -1
+    try {
+      const envelope = (await response.json()) as APIEnvelope<unknown>
+      message = envelope.message || message
+      code = envelope.code
+    } catch { /* response was not JSON */ }
+    throw new APIError(message, code, response.status)
+  }
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const match = disposition.match(/filename="?([^";]+)"?/i)
+  return { blob: await response.blob(), filename: match?.[1] || 'jingshield-attacks.csv' }
+}

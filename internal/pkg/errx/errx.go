@@ -21,6 +21,11 @@ const (
 	CodeOversea      = -114 // 海外 IP 拦截
 	CodeCCAttack     = -115 // CC 攻击
 	CodePolicyAttack = -120 // 自定义策略命中
+
+	// 语义检测相关错误码（P0 阶段）
+	CodePathTraversal = -130 // 路径穿越命中
+	CodeSSRF          = -131 // SSRF 命中
+	CodeXXE           = -132 // XXE 命中
 )
 
 // Error 统一业务错误，携带错误码与提示信息

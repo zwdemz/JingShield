@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/auth'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-const username = ref('admin')
+const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const error = ref('')
@@ -54,7 +54,7 @@ async function submit() {
     </section>
 
     <section class="auth-panel">
-      <form class="auth-card" @submit.prevent="submit">
+      <form class="auth-card" autocomplete="off" @submit.prevent="submit">
         <div class="auth-heading">
           <p class="eyebrow">SECURITY CONSOLE</p>
           <h2>登录控制台</h2>
@@ -64,7 +64,7 @@ async function submit() {
         <label class="field-label" for="username">管理员账号</label>
         <div class="input-shell">
           <UserRound :size="18" />
-          <input id="username" v-model="username" autocomplete="username" maxlength="50" required placeholder="请输入账号" />
+          <input id="username" v-model="username" autocomplete="off" maxlength="50" required placeholder="请输入账号" />
         </div>
 
         <label class="field-label" for="password">密码</label>

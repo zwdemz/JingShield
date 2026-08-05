@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"errors"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -13,6 +14,8 @@ import (
 	"jingshield/internal/policy"
 	"jingshield/internal/repository"
 )
+
+const maxPolicyImportBody = 2 << 20
 
 func (a *API) policyList(w http.ResponseWriter, r *http.Request) {
 	list, err := a.policies.List(r.Context())
@@ -84,8 +87,18 @@ func policyID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 }
 
 func (a *API) policyImport(w http.ResponseWriter, r *http.Request) {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		writeError(w, http.StatusUnsupportedMediaType, -3, "规则包只接受 application/json")
+		return
+	}
 	var pack policy.RulePack
-	if decodeJSON(w, r, &pack) != nil {
+	if err := decodeJSONLimit(w, r, &pack, maxPolicyImportBody); err != nil {
+		var sizeError *http.MaxBytesError
+		if errors.As(err, &sizeError) {
+			writeError(w, http.StatusRequestEntityTooLarge, -3, "规则包不能超过 2MB")
+			return
+		}
 		writeError(w, http.StatusBadRequest, -3, "规则包 JSON 格式错误")
 		return
 	}

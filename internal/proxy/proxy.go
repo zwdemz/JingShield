@@ -92,6 +92,13 @@ func newReverseProxy(rawURL string, passHost, tlsSkipVerify bool, timeout int, d
 		req.Header.Set("X-Forwarded-Host", originalHost)
 		req.Header.Set("X-Forwarded-Proto", originalScheme)
 		if !passHost {
+			// Some origins enforce Go's CrossOriginProtection against Host. A
+			// browser request that was same-origin at the public WAF boundary must
+			// remain same-origin after Host is rewritten for the private upstream.
+			// A genuinely foreign Origin is intentionally left untouched.
+			if requestOriginMatches(req.Header.Get("Origin"), originalScheme, originalHost) {
+				req.Header.Set("Origin", target.Scheme+"://"+target.Host)
+			}
 			req.Host = target.Host
 		}
 	}
@@ -100,6 +107,31 @@ func newReverseProxy(rawURL string, passHost, tlsSkipVerify bool, timeout int, d
 		writeError(w, dynCfg, errx.CodeInternal, "后端服务不可用", http.StatusBadGateway)
 	}
 	return rp, nil
+}
+
+func requestOriginMatches(origin, requestScheme, requestHost string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	requestURL := &url.URL{Scheme: requestScheme, Host: requestHost}
+	return canonicalOrigin(parsed) == canonicalOrigin(requestURL)
+}
+
+func canonicalOrigin(value *url.URL) string {
+	scheme := strings.ToLower(value.Scheme)
+	host := strings.TrimSuffix(strings.ToLower(value.Hostname()), ".")
+	port := value.Port()
+	if port == "" {
+		switch scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+	return scheme + "://" + host + ":" + port
 }
 
 // ServeHTTP 处理请求：先跑保护链，再决定转发或拦截
@@ -149,12 +181,89 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if rc.Verified && decision.AttackType == "穿盾攻击" {
 			p.verify.ClearVerifiedCookie(w)
 		}
-		// 拦截：输出错误响应
-		writeError(w, p.dynCfg, decision.ErrorCode, decision.ErrorMessage, decision.StatusCode)
+		// 拦截：浏览器导航展示安全事件页，程序接口保持 JSON。
+		p.writeBlocked(w, r, rc, decision)
 
 	case protection.DecisionVerify:
 		// 展示验证页
 		p.serveVerificationPage(w, r, rc, decision.VerifyMode)
+	}
+}
+
+func (p *Proxy) writeBlocked(w http.ResponseWriter, r *http.Request, rc *reqctx.RequestContext, decision protection.Decision) {
+	eventID := strings.TrimSpace(rc.EventID)
+	w.Header().Set("X-JingShield-Event-ID", eventID)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	if !wantsBlockedHTML(r) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(decision.StatusCode)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code":     decision.ErrorCode,
+			"message":  "请求已被鲸盾安全防护拦截",
+			"event_id": eventID,
+		})
+		return
+	}
+
+	contact := strings.TrimSpace(p.dynCfg.GetDefault("security_contact", "网站安全管理员"))
+	if contact == "" || len(contact) > 200 {
+		contact = "网站安全管理员"
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.WriteHeader(decision.StatusCode)
+	_ = blockedPage.Execute(w, map[string]string{
+		"EventID":    eventID,
+		"RiskType":   publicRiskType(decision.AttackType),
+		"OccurredAt": time.Now().Format("2006-01-02 15:04:05 MST"),
+		"Contact":    contact,
+	})
+}
+
+func wantsBlockedHTML(r *http.Request) bool {
+	path := strings.ToLower(r.URL.Path)
+	for _, prefix := range []string{"/api", "/openapi", "/cc/"} {
+		if path == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(path, prefix) {
+			return false
+		}
+	}
+	if strings.EqualFold(r.Header.Get("X-Requested-With"), "XMLHttpRequest") {
+		return false
+	}
+	if strings.EqualFold(r.Header.Get("Sec-Fetch-Dest"), "document") || strings.EqualFold(r.Header.Get("Sec-Fetch-Mode"), "navigate") {
+		return true
+	}
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	return strings.Contains(accept, "text/html") && !strings.Contains(accept, "application/json")
+}
+
+// publicRiskType 只返回面向访客的泛化分类，禁止把规则名、表达式或命中详情带到响应中。
+func publicRiskType(attackType string) string {
+	switch attackType {
+	case model.AttackTypeSQL:
+		return "注入攻击风险"
+	case model.AttackTypeXSS:
+		return "脚本注入风险"
+	case model.AttackTypeCC, model.AttackTypeVerifyFail:
+		return "访问频率异常"
+	case model.AttackTypeBlacklist, model.AttackTypeOversea:
+		return "访问策略限制"
+	case model.AttackTypeShieldBypass:
+		return "异常客户端行为"
+	case model.AttackTypePolicy:
+		return "请求安全风险"
+	case model.AttackTypePathTraversal:
+		return "非法路径访问"
+	case model.AttackTypeSSRF:
+		return "非法请求目标"
+	case model.AttackTypeXXE:
+		return "非法数据提交"
+	default:
+		return "请求安全风险"
 	}
 }
 
@@ -291,6 +400,35 @@ const zeroBits=(bytes,bits)=>{const full=Math.floor(bits/8),rest=bits%8;for(let 
 b.onclick=async()=>{b.disabled=true;m.textContent='正在验证…';const body=new URLSearchParams({action:c.dataset.action,token:c.dataset.token,proof});
 try{const r=await fetch('/cc/verify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});if(!r.ok)throw new Error((await r.json()).message||'验证失败');location.assign(c.dataset.redirect)}catch(e){m.textContent=e.message;b.disabled=false}};
 </script></body></html>`))
+
+var blockedPage = template.Must(template.New("blocked").Parse(`<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<link rel="icon" type="image/svg+xml" href="/admin/favicon.svg">
+<link rel="alternate icon" type="image/x-icon" href="/admin/favicon.ico">
+<title>请求已拦截 · 鲸盾安全防护</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:#050a14;color:#eef7ff}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;overflow-x:hidden;background:radial-gradient(circle at 18% 12%,#0f4e6c55 0,transparent 34%),radial-gradient(circle at 82% 84%,#123f7a44 0,transparent 32%),linear-gradient(145deg,#040811 0%,#081423 52%,#050b15 100%)}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.28;background-image:linear-gradient(#6bdcff0c 1px,transparent 1px),linear-gradient(90deg,#6bdcff0c 1px,transparent 1px);background-size:42px 42px;mask-image:linear-gradient(to bottom,#000,transparent 90%)}
+.shell{position:relative;z-index:1;min-height:100vh;display:grid;place-items:center;padding:36px 20px}.card{width:min(850px,100%);overflow:hidden;border:1px solid #70dfff2b;border-radius:24px;background:linear-gradient(145deg,#0c1929ed,#08111eee);box-shadow:0 32px 90px #000a,0 0 0 1px #ffffff06 inset}
+.top{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:22px 28px;border-bottom:1px solid #7bdbff1c;background:#07111d99}.brand{display:flex;align-items:center;gap:12px}.mark{width:42px;height:42px;display:grid;place-items:center;border-radius:13px;color:#75e4ff;background:linear-gradient(145deg,#0e5570,#0b2d49);box-shadow:0 0 28px #39c7f333}.mark svg{width:26px;height:26px}.brand strong{display:block;font-size:17px;letter-spacing:.08em}.brand span{display:block;margin-top:2px;color:#7190a6;font-size:10px;letter-spacing:.22em}.state{display:flex;align-items:center;gap:8px;color:#ff9b9b;font:700 11px/1 system-ui;letter-spacing:.16em}.state i{width:8px;height:8px;border-radius:50%;background:#ff6262;box-shadow:0 0 14px #ff6262}
+.content{padding:48px 52px 42px}.status-line{display:flex;align-items:center;gap:10px;color:#62dff6;font-size:12px;font-weight:700;letter-spacing:.14em}.status-line:before{content:"";width:32px;height:1px;background:#62dff6}.content h1{max-width:620px;margin:19px 0 14px;font-size:clamp(30px,5vw,48px);line-height:1.12;letter-spacing:-.04em}.lead{max-width:660px;margin:0;color:#9eb2c3;font-size:16px;line-height:1.8}
+.details{display:grid;grid-template-columns:1.45fr 1fr 1fr;gap:12px;margin:34px 0}.item{min-width:0;padding:17px 18px;border:1px solid #77cce81c;border-radius:14px;background:#07101d99}.item span{display:block;margin-bottom:8px;color:#66849a;font-size:11px;letter-spacing:.1em}.item strong,.item time{display:block;overflow-wrap:anywhere;color:#e8f7ff;font-size:14px;font-weight:650}.item.event strong{color:#71e2ff;font-family:"SFMono-Regular",Consolas,monospace;letter-spacing:.02em}
+.notice{display:flex;align-items:flex-start;gap:13px;padding:17px 18px;border-left:3px solid #3ed1ec;border-radius:4px 12px 12px 4px;background:#0a2534aa;color:#9fbaca;font-size:13px;line-height:1.7}.notice svg{flex:none;width:19px;height:19px;margin-top:2px;color:#5de0f6}.notice strong{color:#eefaff}.foot{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:30px;color:#526c81;font-size:11px}.foot span:last-child{font-family:Consolas,monospace;letter-spacing:.08em}
+@media(max-width:680px){.shell{padding:14px}.top{padding:18px}.state{display:none}.content{padding:34px 22px 28px}.details{grid-template-columns:1fr}.foot{align-items:flex-start;flex-direction:column}.content h1{font-size:32px}}
+</style>
+</head>
+<body><main class="shell"><section class="card" aria-labelledby="block-title">
+<header class="top"><div class="brand"><div class="mark" aria-hidden="true"><svg viewBox="0 0 64 64" fill="none"><path d="M14 33c7-1 10-7 11-15 7 3 11 8 12 14 4-4 8-6 14-5-2 13-10 22-23 22-9 0-16-5-18-13 8 3 14 1 19-4" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M31 13v7M27.5 16.5h7" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></div><div><strong>捷云鲸盾</strong><span>JINGSHIELD SECURITY</span></div></div><div class="state"><i></i>REQUEST BLOCKED</div></header>
+<div class="content"><div class="status-line">SECURITY INTERCEPTION</div><h1 id="block-title">当前请求已被安全防护拦截</h1><p class="lead">鲸盾检测到本次访问存在安全风险，已终止请求以保护业务系统。若这是正常操作，请勿重复提交，并联系网站安全管理员核查。</p>
+<div class="details"><div class="item event"><span>事件编号 / EVENT ID</span><strong>{{.EventID}}</strong></div><div class="item"><span>风险类型</span><strong>{{.RiskType}}</strong></div><div class="item"><span>拦截时间</span><time>{{.OccurredAt}}</time></div></div>
+<div class="notice"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" stroke="currentColor" stroke-width="1.8"/><path d="M12 8v5m0 3h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><div>如需申诉，请将事件编号 <strong>{{.EventID}}</strong> 提供给：<strong>{{.Contact}}</strong>。</div></div>
+<footer class="foot"><span>Protected by JingShield Web Application Firewall</span><span>HTTP SECURITY EVENT</span></footer></div>
+</section></main></body></html>`))
 
 // defaultErrorPage 默认 HTML 错误页（对应 PHP 默认 custom_error_page）
 const defaultErrorPage = `<!DOCTYPE html>

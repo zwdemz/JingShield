@@ -88,13 +88,16 @@ func execute(args []string, stdout, stderr io.Writer) error {
 		fs := flag.NewFlagSet("init", flag.ContinueOnError)
 		fs.SetOutput(stderr)
 		configPath := configFlag(fs)
-		username := fs.String("username", "admin", "初始管理员用户名")
+		username := fs.String("username", "", "初始管理员用户名（必填）")
 		email := fs.String("email", "", "初始管理员邮箱（可选）")
 		if err := fs.Parse(args); err != nil {
 			return err
 		}
 		if fs.NArg() != 0 {
 			return fmt.Errorf("init 不接受位置参数: %v", fs.Args())
+		}
+		if strings.TrimSpace(*username) == "" {
+			return errors.New("init 必须通过 --username 指定管理员用户名")
 		}
 		return runInit(*configPath, *username, *email, stdout)
 
@@ -238,7 +241,7 @@ func runMigrate(configPath string, stdout io.Writer) error {
 		return err
 	}
 	defer db.Close()
-	fmt.Fprintf(stdout, "数据库 %s 迁移完成（10 张业务表及默认配置）\n", cfg.Database.Name)
+	fmt.Fprintf(stdout, "数据库 %s 迁移完成（13 张业务表及默认配置）\n", cfg.Database.Name)
 	return nil
 }
 
