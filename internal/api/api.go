@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,6 +82,7 @@ func New(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/dashboard/trend", a.protected(http.HandlerFunc(a.dashboardTrend), false, false))
 	mux.Handle("GET /api/v1/dashboard/top-ips", a.protected(http.HandlerFunc(a.dashboardTopIPs), false, false))
 	mux.Handle("GET /api/v1/attacks", a.protected(http.HandlerFunc(a.attackList), false, false))
+	mux.Handle("GET /api/v1/attacks/export", a.protected(http.HandlerFunc(a.attackExport), false, false))
 	mux.Handle("GET /api/v1/access-logs", a.protected(http.HandlerFunc(a.accessLogList), false, false))
 	mux.Handle("GET /api/v1/login-logs", a.protected(http.HandlerFunc(a.loginLogList), false, false))
 	mux.Handle("GET /api/v1/ip-list", a.protected(http.HandlerFunc(a.ipListGet), false, false))
@@ -293,7 +295,12 @@ func (a *API) dashboardTopIPs(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) attackList(w http.ResponseWriter, r *http.Request) {
 	page, size := pagination(r)
-	list, total, err := a.attacks.List(r.Context(), r.URL.Query().Get("attack_type"), r.URL.Query().Get("ip"), page, size)
+	filter, err := attackFilter(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, -3, err.Error())
+		return
+	}
+	list, total, err := a.attacks.List(r.Context(), filter, page, size)
 	if err != nil {
 		a.internalError(w, r, err)
 		return
@@ -302,6 +309,104 @@ func (a *API) attackList(w http.ResponseWriter, r *http.Request) {
 		list = []*model.AttackLog{}
 	}
 	writeOK(w, "success", pageData(list, total, page, size))
+}
+
+func attackFilter(r *http.Request) (repository.AttackLogFilter, error) {
+	filter := repository.AttackLogFilter{
+		EventID:    strings.TrimSpace(r.URL.Query().Get("event_id")),
+		AttackType: strings.TrimSpace(r.URL.Query().Get("attack_type")),
+		IP:         strings.TrimSpace(r.URL.Query().Get("ip")),
+	}
+	if filter.EventID != "" && !validEventID(filter.EventID) {
+		return filter, errors.New("事件编号格式非法")
+	}
+	if value := r.URL.Query().Get("severity"); value != "" {
+		severity, err := strconv.Atoi(value)
+		if err != nil || severity < model.AttackSeverityInfo || severity > model.AttackSeverityCritical {
+			return filter, errors.New("严重度必须为 1-5")
+		}
+		filter.Severity = severity
+	}
+	parseTime := func(key string) (*time.Time, error) {
+		value := r.URL.Query().Get(key)
+		if value == "" {
+			return nil, nil
+		}
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return nil, fmt.Errorf("%s 必须为 RFC3339 时间", key)
+		}
+		return &parsed, nil
+	}
+	var err error
+	if filter.StartAt, err = parseTime("start_at"); err != nil {
+		return filter, err
+	}
+	if filter.EndAt, err = parseTime("end_at"); err != nil {
+		return filter, err
+	}
+	if filter.StartAt != nil && filter.EndAt != nil && !filter.EndAt.After(*filter.StartAt) {
+		return filter, errors.New("end_at 必须晚于 start_at")
+	}
+	return filter, nil
+}
+
+func validEventID(value string) bool {
+	if len(value) < 8 || len(value) > 40 || !strings.HasPrefix(value, "JS-") {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *API) attackExport(w http.ResponseWriter, r *http.Request) {
+	filter, err := attackFilter(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, -3, err.Error())
+		return
+	}
+	filename := "jingshield-attacks-" + time.Now().Format("20060102-150405") + ".csv"
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = io.WriteString(w, "\uFEFF")
+	writer := csv.NewWriter(w)
+	if err := writer.Write([]string{"记录ID", "事件编号", "严重度", "攻击类型", "来源IP", "归属地", "访问域名", "方法", "URI", "攻击详情", "请求报文", "累计次数", "处置结果", "发生时间"}); err != nil {
+		return
+	}
+	err = a.attacks.Stream(r.Context(), filter, func(log *model.AttackLog) error {
+		status := "已拦截"
+		if log.Status == 2 {
+			status = "仅记录"
+		}
+		return writer.Write([]string{
+			strconv.FormatInt(log.ID, 10), safeSpreadsheetCell(log.EventID), model.AttackSeverityLabel(log.Severity), safeSpreadsheetCell(log.AttackType),
+			safeSpreadsheetCell(log.IP), safeSpreadsheetCell(log.IPLocation), safeSpreadsheetCell(log.Host),
+			safeSpreadsheetCell(log.Method), safeSpreadsheetCell(log.URI), safeSpreadsheetCell(log.AttackDetail),
+			safeSpreadsheetCell(log.RequestPacket),
+			strconv.Itoa(log.AttackCount), status, log.CreatedAt.Format(time.RFC3339),
+		})
+	})
+	writer.Flush()
+	if err == nil {
+		err = writer.Error()
+	}
+	if err != nil {
+		logx.Error("导出攻击事件失败", "err", err)
+	}
+}
+
+func safeSpreadsheetCell(value string) string {
+	trimmed := strings.TrimLeft(value, " \t\r\n")
+	if trimmed != "" && strings.ContainsRune("=+-@", rune(trimmed[0])) {
+		return "'" + value
+	}
+	return value
 }
 
 func (a *API) accessLogList(w http.ResponseWriter, r *http.Request) {
@@ -417,7 +522,7 @@ func (a *API) configPut(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, "配置已更新", nil)
 }
 
-var statusKeys = []string{"system_status", "cc_protection_status", "xss_protection_status", "sql_protection_status", "oversea_ip_status", "file_check_status"}
+var statusKeys = []string{"system_status", "cc_protection_status", "xss_protection_status", "sql_protection_status", "path_traversal_protection_status", "ssrf_protection_status", "xxe_protection_status", "oversea_ip_status", "file_check_status"}
 
 func (a *API) systemStatusGet(w http.ResponseWriter, _ *http.Request) {
 	data := make(map[string]int, len(statusKeys))
@@ -495,7 +600,11 @@ func (a *API) passwordPut(w http.ResponseWriter, r *http.Request) {
 func currentSession(r *http.Request) session { return r.Context().Value(sessionContextKey{}).(session) }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
+	return decodeJSONLimit(w, r, dst, maxJSONBody)
+}
+
+func decodeJSONLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
@@ -571,7 +680,7 @@ func validIPRule(rule string) bool {
 }
 
 func validDynamicConfig(key, value string) bool {
-	boolKeys := map[string]bool{"system_status": true, "cc_protection_status": true, "xss_protection_status": true, "sql_protection_status": true, "file_check_status": true, "oversea_ip_status": true, "api_enabled": true}
+	boolKeys := map[string]bool{"system_status": true, "cc_protection_status": true, "xss_protection_status": true, "sql_protection_status": true, "path_traversal_protection_status": true, "ssrf_protection_status": true, "xxe_protection_status": true, "file_check_status": true, "oversea_ip_status": true, "api_enabled": true}
 	if boolKeys[key] {
 		return value == "0" || value == "1"
 	}
@@ -590,6 +699,10 @@ func validDynamicConfig(key, value string) bool {
 	}
 	if key == "custom_error_page" {
 		return len(value) <= 65535
+	}
+	if key == "security_contact" {
+		trimmed := strings.TrimSpace(value)
+		return len(trimmed) >= 1 && len(trimmed) <= 200 && !strings.ContainsAny(trimmed, "\r\n")
 	}
 	return false
 }

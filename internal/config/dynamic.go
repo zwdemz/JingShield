@@ -32,13 +32,14 @@ var defaultDynamicConfig = map[string]string{
 	"file_check_status":              "0",    // 文件校验开关
 	"log_keep_days":                  "30",   // 日志保留天数
 	"error_output_format":            "json", // 错误输出格式 json/html
-	"oversea_ip_status":              "0",    // 海外 IP 拦截开关
-	"api_enabled":                    "1",    // 外部设备联动 API 开关
-	"alert_cpu_percent":              "80",   // CPU 使用率告警阈值
-	"alert_memory_percent":           "85",   // 内存使用率告警阈值
-	"alert_disk_percent":             "85",   // 磁盘使用率告警阈值
-	"alert_log_size_mb":              "512",  // 日志目录大小告警阈值
-	"alert_request_rate":             "600",  // 业务请求速率告警阈值（请求/分钟）
+	"security_contact":               "网站安全管理员",
+	"oversea_ip_status":              "0",   // 海外 IP 拦截开关
+	"api_enabled":                    "1",   // 外部设备联动 API 开关
+	"alert_cpu_percent":              "80",  // CPU 使用率告警阈值
+	"alert_memory_percent":           "85",  // 内存使用率告警阈值
+	"alert_disk_percent":             "85",  // 磁盘使用率告警阈值
+	"alert_log_size_mb":              "512", // 日志目录大小告警阈值
+	"alert_request_rate":             "600", // 业务请求速率告警阈值（请求/分钟）
 	"device_auto_block_enabled":      "0",
 	"device_auto_block_severity":     "8",
 	"device_auto_block_seconds":      "3600",

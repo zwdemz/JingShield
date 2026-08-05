@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"jingshield/internal/model"
 )
@@ -25,6 +26,12 @@ func NewAttackLogRepo(db *sql.DB) *AttackLogRepo {
 // 对应 PHP logAttack() 的 SELECT/UPDATE/INSERT 三段式逻辑
 // 返回最新累计攻击次数
 func (r *AttackLogRepo) UpsertAttack(ctx context.Context, log *model.AttackLog) (int, error) {
+	if log.Status != 1 && log.Status != 2 {
+		log.Status = 1
+	}
+	if log.Severity < model.AttackSeverityInfo || log.Severity > model.AttackSeverityCritical {
+		log.Severity = model.AttackSeverityFor(log.AttackType, log.Status)
+	}
 	// 查询当日是否已存在同 IP 同类型记录
 	var id int64
 	var attackCount int
@@ -38,21 +45,32 @@ func (r *AttackLogRepo) UpsertAttack(ctx context.Context, log *model.AttackLog) 
 		// 已存在，累加次数
 		attackCount++
 		_, err = r.db.ExecContext(ctx,
-			"UPDATE jyj_attack_log SET attack_count = ?, ip_location = ? WHERE id = ?",
-			attackCount, log.IPLocation, id)
+			`UPDATE jyj_attack_log SET attack_count = ?, ip_location = ?, host = ?, uri = ?, method = ?,
+			 attack_detail = ?, request_packet = ?, event_id = ?, severity = GREATEST(severity, ?), status = LEAST(status, ?) WHERE id = ?`,
+			attackCount, log.IPLocation, log.Host, log.URI, log.Method, log.AttackDetail, log.RequestPacket, log.EventID, log.Severity, log.Status, id)
 		if err != nil {
 			return attackCount, fmt.Errorf("更新攻击次数失败: %w", err)
+		}
+		if err := r.storeEventReference(ctx, log.EventID, id); err != nil {
+			return attackCount, err
 		}
 	case err == sql.ErrNoRows:
 		// 不存在，新建
 		attackCount = 1
-		_, err = r.db.ExecContext(ctx,
-			`INSERT INTO jyj_attack_log (ip, ip_location, host, uri, method, attack_type, attack_detail, attack_count, status, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-			log.IP, log.IPLocation, log.Host, log.URI, log.Method,
-			log.AttackType, log.AttackDetail, attackCount, log.Status)
+		result, insertErr := r.db.ExecContext(ctx,
+			`INSERT INTO jyj_attack_log (event_id, ip, ip_location, host, uri, method, attack_type, severity, attack_detail, request_packet, attack_count, status, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+			log.EventID, log.IP, log.IPLocation, log.Host, log.URI, log.Method,
+			log.AttackType, log.Severity, log.AttackDetail, log.RequestPacket, attackCount, log.Status)
+		if insertErr != nil {
+			return attackCount, fmt.Errorf("写入攻击日志失败: %w", insertErr)
+		}
+		id, err = result.LastInsertId()
 		if err != nil {
-			return attackCount, fmt.Errorf("写入攻击日志失败: %w", err)
+			return attackCount, fmt.Errorf("读取攻击日志 ID 失败: %w", err)
+		}
+		if err := r.storeEventReference(ctx, log.EventID, id); err != nil {
+			return attackCount, err
 		}
 	default:
 		return attackCount, fmt.Errorf("查询攻击日志失败: %w", err)
@@ -60,20 +78,62 @@ func (r *AttackLogRepo) UpsertAttack(ctx context.Context, log *model.AttackLog) 
 	return attackCount, nil
 }
 
-// List 分页查询攻击日志（支持按攻击类型筛选）
-// 对应后台 attack_log.php 列表
-func (r *AttackLogRepo) List(ctx context.Context, attackType, ip string, page, size int) ([]*model.AttackLog, int64, error) {
-	// 构造条件
+func (r *AttackLogRepo) storeEventReference(ctx context.Context, eventID string, attackLogID int64) error {
+	if eventID == "" {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO jyj_attack_event_ref (event_id, attack_log_id, occurred_at) VALUES (?, ?, NOW())
+		 ON DUPLICATE KEY UPDATE attack_log_id = VALUES(attack_log_id), occurred_at = VALUES(occurred_at)`,
+		eventID, attackLogID)
+	if err != nil {
+		return fmt.Errorf("写入攻击事件编号索引失败: %w", err)
+	}
+	return nil
+}
+
+type AttackLogFilter struct {
+	EventID    string
+	AttackType string
+	IP         string
+	Severity   int
+	StartAt    *time.Time
+	EndAt      *time.Time
+}
+
+func buildAttackLogWhere(filter AttackLogFilter) (string, []any) {
 	where := " WHERE 1=1"
-	args := []interface{}{}
-	if attackType != "" {
+	args := []any{}
+	if filter.EventID != "" {
+		where += " AND id = (SELECT attack_log_id FROM jyj_attack_event_ref WHERE event_id = ? LIMIT 1)"
+		args = append(args, filter.EventID)
+	}
+	if filter.AttackType != "" {
 		where += " AND attack_type = ?"
-		args = append(args, attackType)
+		args = append(args, filter.AttackType)
 	}
-	if ip != "" {
+	if filter.IP != "" {
 		where += " AND ip = ?"
-		args = append(args, ip)
+		args = append(args, filter.IP)
 	}
+	if filter.Severity >= model.AttackSeverityInfo && filter.Severity <= model.AttackSeverityCritical {
+		where += " AND severity = ?"
+		args = append(args, filter.Severity)
+	}
+	if filter.StartAt != nil {
+		where += " AND created_at >= ?"
+		args = append(args, *filter.StartAt)
+	}
+	if filter.EndAt != nil {
+		where += " AND created_at < ?"
+		args = append(args, *filter.EndAt)
+	}
+	return where, args
+}
+
+// List performs indexed server-side pagination for attack events.
+func (r *AttackLogRepo) List(ctx context.Context, filter AttackLogFilter, page, size int) ([]*model.AttackLog, int64, error) {
+	where, args := buildAttackLogWhere(filter)
 
 	var total int64
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM jyj_attack_log"+where, args...).Scan(&total); err != nil {
@@ -84,8 +144,8 @@ func (r *AttackLogRepo) List(ctx context.Context, attackType, ip string, page, s
 	if offset < 0 {
 		offset = 0
 	}
-	query := "SELECT id, ip, ip_location, host, uri, method, attack_type, attack_detail, attack_count, status, created_at FROM jyj_attack_log" +
-		where + " ORDER BY id DESC LIMIT ? OFFSET ?"
+	query := "SELECT id, COALESCE(event_id, ''), ip, ip_location, host, uri, method, attack_type, severity, attack_detail, COALESCE(request_packet, ''), attack_count, status, created_at FROM jyj_attack_log" +
+		where + " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
 	args = append(args, size, offset)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -97,13 +157,44 @@ func (r *AttackLogRepo) List(ctx context.Context, attackType, ip string, page, s
 	var logs []*model.AttackLog
 	for rows.Next() {
 		l := &model.AttackLog{}
-		if err := rows.Scan(&l.ID, &l.IP, &l.IPLocation, &l.Host, &l.URI, &l.Method,
-			&l.AttackType, &l.AttackDetail, &l.AttackCount, &l.Status, &l.CreatedAt); err != nil {
-			continue
+		if err := rows.Scan(&l.ID, &l.EventID, &l.IP, &l.IPLocation, &l.Host, &l.URI, &l.Method,
+			&l.AttackType, &l.Severity, &l.AttackDetail, &l.RequestPacket, &l.AttackCount, &l.Status, &l.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		if filter.EventID != "" {
+			// 精确编号查询应回显用户提交的历史编号，而不是聚合行上的最新编号。
+			l.EventID = filter.EventID
 		}
 		logs = append(logs, l)
 	}
-	return logs, total, nil
+	return logs, total, rows.Err()
+}
+
+// Stream walks every matching event in a stable order without buffering the
+// full result set. It is used by CSV export for large datasets.
+func (r *AttackLogRepo) Stream(ctx context.Context, filter AttackLogFilter, visit func(*model.AttackLog) error) error {
+	where, args := buildAttackLogWhere(filter)
+	query := "SELECT id, COALESCE(event_id, ''), ip, ip_location, host, uri, method, attack_type, severity, attack_detail, COALESCE(request_packet, ''), attack_count, status, created_at FROM jyj_attack_log" +
+		where + " ORDER BY created_at DESC, id DESC"
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		log := &model.AttackLog{}
+		if err := rows.Scan(&log.ID, &log.EventID, &log.IP, &log.IPLocation, &log.Host, &log.URI, &log.Method,
+			&log.AttackType, &log.Severity, &log.AttackDetail, &log.RequestPacket, &log.AttackCount, &log.Status, &log.CreatedAt); err != nil {
+			return err
+		}
+		if filter.EventID != "" {
+			log.EventID = filter.EventID
+		}
+		if err := visit(log); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
 
 // SumAttackCount 攻击总次数（仪表盘统计）

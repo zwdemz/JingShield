@@ -18,6 +18,7 @@ const switches = [
   { key: 'oversea_ip_status', label: '海外 IP 限制', desc: '依赖 QQWry 归属地数据库' },
 ]
 const fields = computed(() => configs.value.filter((item) => ['cc_visit_count', 'cc_visit_time', 'cc_blacklist_time', 'cc_verify_fail_limit', 'cc_whitelist_time', 'cc_verification_mode', 'log_keep_days'].includes(item.config_key)))
+const securityContact = computed(() => configs.value.find((item) => item.config_key === 'security_contact'))
 
 async function load() {
   loading.value = true
@@ -62,7 +63,7 @@ onMounted(load)
       </article>
       <article class="panel settings-panel">
         <div class="panel-heading"><div><span>策略阈值</span><strong>CC 与日志参数</strong></div><SlidersHorizontal :size="21" /></div>
-        <div class="config-list"><label v-for="item in fields" :key="item.config_key"><span><strong>{{ item.config_desc || item.config_key }}</strong><small>{{ item.config_key }}</small></span><div><input v-model="item.config_value" inputmode="numeric" /><button :disabled="saving === item.config_key" title="保存" @click="saveField(item)"><Save :size="16" /></button></div></label></div>
+        <div class="config-list"><label v-for="item in fields" :key="item.config_key"><span><strong>{{ item.config_desc || item.config_key }}</strong><small>{{ item.config_key }}</small></span><div><input v-model="item.config_value" inputmode="numeric" /><button :disabled="saving === item.config_key" title="保存" @click="saveField(item)"><Save :size="16" /></button></div></label><label v-if="securityContact" class="text-config"><span><strong>{{ securityContact.config_desc || '拦截页联系信息' }}</strong><small>security_contact</small></span><div><input v-model="securityContact.config_value" maxlength="200" placeholder="网站安全管理员" /><button :disabled="saving === securityContact.config_key" title="保存" @click="saveField(securityContact)"><Save :size="16" /></button></div></label></div>
       </article>
       <article class="panel maintenance-panel">
         <div class="maintenance-icon"><DatabaseZap :size="24" /></div><div><strong>清理运行时缓存</strong><p>清除当前节点的频率窗口、端口记录和请求行为计数，不删除数据库日志。</p></div><button class="secondary-button" :disabled="saving === 'cache'" @click="clearCache">{{ saving === 'cache' ? '清理中…' : '立即清理' }}</button>

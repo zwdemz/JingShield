@@ -81,17 +81,20 @@ type IPList struct {
 
 // AttackLog 攻击日志表 jyj_attack_log
 type AttackLog struct {
-	ID           int64     `json:"id"            db:"id"`
-	IP           string    `json:"ip"            db:"ip"`
-	IPLocation   string    `json:"ip_location"   db:"ip_location"`
-	Host         string    `json:"host"          db:"host"`
-	URI          string    `json:"uri"           db:"uri"`
-	Method       string    `json:"method"        db:"method"`
-	AttackType   string    `json:"attack_type"   db:"attack_type"`
-	AttackDetail string    `json:"attack_detail" db:"attack_detail"`
-	AttackCount  int       `json:"attack_count"  db:"attack_count"`
-	Status       int       `json:"status"        db:"status"` // 1=已拦截 2=已放行
-	CreatedAt    time.Time `json:"created_at"    db:"created_at"`
+	ID            int64     `json:"id"            db:"id"`
+	EventID       string    `json:"event_id"      db:"event_id"`
+	IP            string    `json:"ip"            db:"ip"`
+	IPLocation    string    `json:"ip_location"   db:"ip_location"`
+	Host          string    `json:"host"          db:"host"`
+	URI           string    `json:"uri"           db:"uri"`
+	Method        string    `json:"method"        db:"method"`
+	AttackType    string    `json:"attack_type"   db:"attack_type"`
+	Severity      int       `json:"severity"      db:"severity"`
+	AttackDetail  string    `json:"attack_detail" db:"attack_detail"`
+	RequestPacket string    `json:"request_packet" db:"request_packet"`
+	AttackCount   int       `json:"attack_count"  db:"attack_count"`
+	Status        int       `json:"status"        db:"status"` // 1=已拦截 2=已放行
+	CreatedAt     time.Time `json:"created_at"    db:"created_at"`
 }
 
 // AccessLog 访问日志表 jyj_access_log
@@ -164,4 +167,52 @@ const (
 	AttackTypeShieldBypass = "穿盾攻击"
 	AttackTypeVerifyFail   = "验证失败次数过多"
 	AttackTypePolicy       = "自定义策略"
+	AttackTypePathTraversal = "路径穿越"
+	AttackTypeSSRF          = "SSRF"
+	AttackTypeXXE           = "XXE"
 )
+
+// 攻击事件严重度。数值越高风险越高，便于数据库筛选和排序。
+const (
+	AttackSeverityInfo     = 1
+	AttackSeverityLow      = 2
+	AttackSeverityMedium   = 3
+	AttackSeverityHigh     = 4
+	AttackSeverityCritical = 5
+)
+
+// AttackSeverityFor returns a stable default severity for an attack event.
+// Log-only custom policy matches are informational; blocked policy matches are
+// medium risk unless a more specific detector classifies them elsewhere.
+func AttackSeverityFor(attackType string, status int) int {
+	if attackType == AttackTypePolicy && status == 2 {
+		return AttackSeverityInfo
+	}
+	switch attackType {
+	case AttackTypeSQL, AttackTypeShieldBypass, AttackTypeSSRF, AttackTypeXXE:
+		return AttackSeverityCritical
+	case AttackTypeXSS, AttackTypeBlacklist, AttackTypePathTraversal:
+		return AttackSeverityHigh
+	case AttackTypeCC, AttackTypePolicy:
+		return AttackSeverityMedium
+	case AttackTypeOversea, AttackTypeVerifyFail:
+		return AttackSeverityLow
+	default:
+		return AttackSeverityInfo
+	}
+}
+
+func AttackSeverityLabel(severity int) string {
+	switch severity {
+	case AttackSeverityCritical:
+		return "严重"
+	case AttackSeverityHigh:
+		return "高危"
+	case AttackSeverityMedium:
+		return "中危"
+	case AttackSeverityLow:
+		return "低危"
+	default:
+		return "信息"
+	}
+}

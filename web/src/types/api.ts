@@ -39,13 +39,16 @@ export interface PageData<T> {
 
 export interface AttackLog {
   id: number
+  event_id: string
   ip: string
   ip_location: string
   host: string
   uri: string
   method: string
   attack_type: string
+  severity: 1 | 2 | 3 | 4 | 5
   attack_detail: string
+  request_packet: string
   attack_count: number
   status: number
   created_at: string

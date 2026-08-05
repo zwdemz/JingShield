@@ -7,8 +7,8 @@ import (
 )
 
 func TestSchemaMigrationsAreNonDestructiveAndComplete(t *testing.T) {
-	if len(schemaMigrations) != 13 {
-		t.Fatalf("migration count = %d, want 12 tables plus defaults", len(schemaMigrations))
+	if len(schemaMigrations) != 14 {
+		t.Fatalf("migration count = %d, want 13 tables plus defaults", len(schemaMigrations))
 	}
 	joined := ""
 	for _, migration := range schemaMigrations {
@@ -21,17 +21,23 @@ func TestSchemaMigrationsAreNonDestructiveAndComplete(t *testing.T) {
 		joined += "\n" + migration.sql
 	}
 	for _, table := range []string{
-		"jyj_config", "jyj_ip_list", "jyj_attack_log", "jyj_access_log",
+		"jyj_config", "jyj_ip_list", "jyj_attack_log", "jyj_attack_event_ref", "jyj_access_log",
 		"jyj_file_check", "jyj_users", "jyj_url_rules", "jyj_verify_fail", "jyj_login_log", "jyj_sites", "jyj_policy_rules", "jyj_device_events",
 	} {
 		if !strings.Contains(joined, "CREATE TABLE IF NOT EXISTS "+table) {
 			t.Errorf("missing migration for %s", table)
 		}
 	}
-	for _, key := range []string{"system_status", "cc_protection_status", "api_key", "alert_cpu_percent", "alert_request_rate"} {
+	for _, key := range []string{"system_status", "cc_protection_status", "api_key", "alert_cpu_percent", "alert_request_rate", "security_contact"} {
 		if !strings.Contains(joined, "'"+key+"'") {
 			t.Errorf("missing default config %s", key)
 		}
+	}
+	if !strings.Contains(joined, "request_packet MEDIUMTEXT") {
+		t.Fatal("attack log schema is missing request_packet")
+	}
+	if !strings.Contains(joined, "event_id VARCHAR(40)") {
+		t.Fatal("attack log schema is missing event_id")
 	}
 }
 

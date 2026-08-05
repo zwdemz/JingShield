@@ -1,0 +1,536 @@
+{
+  "schema": "jingshield.rules/v1",
+  "version": "baseline-2026.08.1",
+  "rules": [
+    {
+      "name": "JNDI 变量与混淆表达式",
+      "category": "Java/JNDI",
+      "target": "all",
+      "pattern": "(?i)\\$\\{(?:jndi|lower|upper|env|sys|date|ctx|main):",
+      "action": 1,
+      "enabled": true,
+      "priority": 100,
+      "description": "拦截 JNDI 与常见变量混淆表达式；仍须升级受影响的日志和 Java 组件"
+    },
+    {
+      "name": "Fastjson 高风险 AutoType 类型",
+      "category": "反序列化",
+      "target": "body",
+      "pattern": "(?i)\"(?:@type|\\\\u0040type)\"\\s*:\\s*\"[^\"\\r\\n]{0,512}(?:ClassLoader|DataSource|RowSet|JdbcRowSetImpl|TemplatesImpl|Inet4Address|InitialContext)[^\"\\r\\n]{0,512}\"",
+      "action": 1,
+      "enabled": true,
+      "priority": 110,
+      "description": "拦截 Fastjson AutoType 常见高风险类族；应用仍应启用 SafeMode 并升级依赖"
+    },
+    {
+      "name": "JSON.NET 高风险类型元数据",
+      "category": "反序列化",
+      "target": "body",
+      "pattern": "(?i)\"\\$type\"\\s*:\\s*\"[^\"\\r\\n]{0,512}(?:ObjectDataProvider|WindowsIdentity|System\\.Diagnostics\\.Process|System\\.Configuration\\.Install)[^\"\\r\\n]{0,512}\"",
+      "action": 1,
+      "enabled": true,
+      "priority": 120,
+      "description": "拦截 JSON.NET 输入中的高风险类型元数据，不替代安全的 TypeNameHandling 配置"
+    },
+    {
+      "name": "Java 原生序列化 Base64 特征",
+      "category": "反序列化",
+      "target": "all",
+      "pattern": "(?:^|[^A-Za-z0-9+/])rO0AB[A-Za-z0-9+/=]{8,}",
+      "action": 1,
+      "enabled": true,
+      "priority": 130,
+      "description": "识别 Java ObjectStream 的常见 Base64 魔数；禁止对不可信输入使用原生反序列化"
+    },
+    {
+      "name": "PHP 对象序列化输入",
+      "category": "反序列化",
+      "target": "all",
+      "pattern": "(?:^|[;&={])O:[0-9]{1,7}:\"[^\"\\r\\n]{1,200}\":[0-9]{1,7}:\\{",
+      "action": 1,
+      "enabled": true,
+      "priority": 140,
+      "description": "拦截外部输入中的 PHP 对象序列化结构；普通标量序列化不会命中"
+    },
+    {
+      "name": "危险 YAML Python Ruby 标签",
+      "category": "反序列化",
+      "target": "body",
+      "pattern": "(?i)!!(?:python/(?:object|module|name)|ruby/object)|!ruby/object:",
+      "action": 1,
+      "enabled": true,
+      "priority": 150,
+      "description": "拦截可触发对象构造的危险 YAML 标签；服务端应使用安全加载模式"
+    },
+    {
+      "name": "Node 序列化函数载荷",
+      "category": "反序列化",
+      "target": "body",
+      "pattern": "_\\$\\$ND_FUNC\\$\\$_|function\\s*\\([^)]{0,200}\\)\\s*\\{[^}]{0,512}(?:child_process|require\\s*\\()",
+      "action": 1,
+      "enabled": true,
+      "priority": 160,
+      "description": "识别 node-serialize 风格函数标记与含 child_process/require 的函数对象"
+    },
+    {
+      "name": "SQL 时间盲注函数",
+      "category": "SQL 注入",
+      "target": "args",
+      "pattern": "(?i)(?:\\b(?:sleep|benchmark|pg_sleep)\\s*\\(|\\bwaitfor\\s+delay\\b|\\bdbms_(?:pipe|lock)\\.)",
+      "action": 1,
+      "enabled": true,
+      "priority": 200,
+      "description": "拦截 MySQL、PostgreSQL、SQL Server 与 Oracle 常见时间盲注函数"
+    },
+    {
+      "name": "SQL UNION 查询注入",
+      "category": "SQL 注入",
+      "target": "args",
+      "pattern": "(?i)\\bunion(?:\\s+all)?\\s+select\\b",
+      "action": 1,
+      "enabled": true,
+      "priority": 210,
+      "description": "拦截参数值中的 UNION SELECT 结构；如业务允许提交 SQL，请按站点单独放行"
+    },
+    {
+      "name": "SQL 文件与系统执行能力",
+      "category": "SQL 注入",
+      "target": "args",
+      "pattern": "(?i)\\b(?:load_file|into\\s+(?:out|dump)file|xp_cmdshell|sp_oacreate|copy\\s+[^;]{0,200}\\s+to\\s+program)\\b",
+      "action": 1,
+      "enabled": true,
+      "priority": 220,
+      "description": "拦截数据库读写文件或调用系统命令的高风险 SQL 片段"
+    },
+    {
+      "name": "SQL 堆叠危险语句审计",
+      "category": "SQL 注入",
+      "target": "args",
+      "pattern": "(?i);\\s*(?:drop|alter|truncate|create|grant|revoke|insert|update|delete)\\s+",
+      "action": 2,
+      "enabled": true,
+      "priority": 5230,
+      "description": "记录疑似堆叠 SQL；可能命中数据库管理类合法输入，观察后再决定是否阻断"
+    },
+    {
+      "name": "NoSQL 服务端脚本操作符",
+      "category": "NoSQL 注入",
+      "target": "body",
+      "pattern": "(?i)\"\\$(?:where|function|accumulator)\"\\s*:",
+      "action": 1,
+      "enabled": true,
+      "priority": 240,
+      "description": "拦截 MongoDB 风格服务端 JavaScript 与自定义累加器操作符"
+    },
+    {
+      "name": "NoSQL 比较操作符审计",
+      "category": "NoSQL 注入",
+      "target": "body",
+      "pattern": "(?i)\"\\$(?:ne|nin|gt|gte|lt|lte|regex|exists)\"\\s*:",
+      "action": 2,
+      "enabled": true,
+      "priority": 5250,
+      "description": "记录客户端提交的 NoSQL 比较操作符；查询 DSL 业务可能合法使用，默认不阻断"
+    },
+    {
+      "name": "Elasticsearch 动态脚本审计",
+      "category": "NoSQL 注入",
+      "target": "body",
+      "pattern": "(?is)\"script\"\\s*:\\s*\\{.{0,512}\"(?:source|inline)\"\\s*:",
+      "action": 2,
+      "enabled": true,
+      "priority": 5260,
+      "description": "记录外部提交的 Elasticsearch 动态脚本，请在应用端使用受控模板和参数"
+    },
+    {
+      "name": "Shell 分隔符命令注入",
+      "category": "命令注入",
+      "target": "args",
+      "pattern": "(?i)(?:;|\\|\\||&&|\\|)\\s*(?:/[A-Za-z0-9_./-]+/)?(?:sh|bash|cmd|powershell|curl|wget|nc|netcat|python|perl|ruby|php)\\b",
+      "action": 1,
+      "enabled": true,
+      "priority": 300,
+      "description": "识别 shell 分隔符后启动解释器、下载器或网络工具的命令注入"
+    },
+    {
+      "name": "Shell 命令替换注入",
+      "category": "命令注入",
+      "target": "args",
+      "pattern": "(?i)(?:\\$\\(|`)[^\\r\\n]{0,512}\\b(?:id|whoami|uname|curl|wget|nc|cat|sh|bash)\\b",
+      "action": 1,
+      "enabled": true,
+      "priority": 310,
+      "description": "拦截 $() 或反引号命令替换中的常见系统与网络命令"
+    },
+    {
+      "name": "PowerShell 编码命令",
+      "category": "命令注入",
+      "target": "all",
+      "pattern": "(?i)\\b(?:powershell|pwsh)(?:\\.exe)?\\b[^\\r\\n]{0,256}-(?:enc|encodedcommand)\\s+[A-Za-z0-9+/=]{16,}",
+      "action": 1,
+      "enabled": true,
+      "priority": 320,
+      "description": "识别通过 PowerShell EncodedCommand 隐藏的命令执行输入"
+    },
+    {
+      "name": "系统敏感文件命令读取",
+      "category": "命令注入",
+      "target": "args",
+      "pattern": "(?i)\\b(?:cat|head|tail|more|type)\\s+[^\\r\\n]{0,128}(?:/etc/(?:passwd|shadow)|/proc/self/environ|windows[/\\\\]win\\.ini)\\b",
+      "action": 1,
+      "enabled": true,
+      "priority": 330,
+      "description": "拦截通过常见系统命令读取敏感文件的输入"
+    },
+    {
+      "name": "编码 HTML 活动标签",
+      "category": "XSS",
+      "target": "args",
+      "pattern": "(?i)(?:%3c|&lt;|\\\\u003c)(?:script|svg|iframe|object|embed)\\b",
+      "action": 1,
+      "enabled": true,
+      "priority": 400,
+      "description": "识别 URL、HTML 实体或 JSON Unicode 编码后的活动 HTML 标签"
+    },
+    {
+      "name": "HTML 事件处理器注入",
+      "category": "XSS",
+      "target": "args",
+      "pattern": "(?is)<[^>]{0,512}\\bon(?:error|load|click|focus|mouseover|animationstart|begin)\\s*=",
+      "action": 1,
+      "enabled": true,
+      "priority": 410,
+      "description": "拦截常见 HTML/SVG 事件处理器属性注入"
+    },
+    {
+      "name": "危险脚本 URI",
+      "category": "XSS",
+      "target": "args",
+      "pattern": "(?i)(?:javascript|vbscript|data\\s*:\\s*text/html)\\s*:",
+      "action": 1,
+      "enabled": true,
+      "priority": 420,
+      "description": "拦截 javascript、vbscript 与 data:text/html 活动 URI"
+    },
+    {
+      "name": "Iframe srcdoc 注入",
+      "category": "XSS",
+      "target": "args",
+      "pattern": "(?is)<iframe[^>]{0,512}\\bsrcdoc\\s*=",
+      "action": 1,
+      "enabled": true,
+      "priority": 430,
+      "description": "拦截利用 iframe srcdoc 直接注入活动文档的输入"
+    },
+    {
+      "name": "编码与双重编码路径穿越",
+      "category": "路径穿越",
+      "target": "all",
+      "pattern": "(?i)(?:\\.\\.(?:/|\\\\)|%2e%2e(?:%2f|%5c|/|\\\\)|%252e%252e(?:%252f|%255c))",
+      "action": 1,
+      "enabled": true,
+      "priority": 500,
+      "description": "拦截明文、URL 编码和双重编码的父目录穿越片段"
+    },
+    {
+      "name": "敏感系统文件访问",
+      "category": "路径穿越",
+      "target": "all",
+      "pattern": "(?i)(?:/etc/(?:passwd|shadow|hosts)|/proc/(?:self|[0-9]+)/environ|windows[/\\\\](?:win\\.ini|system32)|boot\\.ini|web\\.config)(?:$|[?&#\\s])",
+      "action": 1,
+      "enabled": true,
+      "priority": 510,
+      "description": "拦截常见 Linux、Windows 敏感文件路径访问"
+    },
+    {
+      "name": "危险文件包装器协议",
+      "category": "路径穿越",
+      "target": "all",
+      "pattern": "(?i)\\b(?:php|phar|zip|expect|data|jar):(?://|[^A-Za-z0-9])",
+      "action": 1,
+      "enabled": true,
+      "priority": 520,
+      "description": "拦截可能用于 LFI、反序列化或代码加载的文件包装器协议"
+    },
+    {
+      "name": "Java Web 内部资源访问",
+      "category": "路径穿越",
+      "target": "all",
+      "pattern": "(?i)(?:^|[/\\\\])(?:WEB-INF/(?:web\\.xml|classes|lib)|META-INF/(?:MANIFEST\\.MF|context\\.xml))(?:$|[/\\\\?])",
+      "action": 1,
+      "enabled": true,
+      "priority": 530,
+      "description": "拦截对 Java Web 应用内部描述符、类与库目录的访问"
+    },
+    {
+      "name": "SSRF 内网 IPv4 目标",
+      "category": "SSRF",
+      "target": "args",
+      "pattern": "(?i)\\bhttps?://(?:localhost|127(?:\\.[0-9]{1,3}){0,3}|10(?:\\.[0-9]{1,3}){3}|192\\.168(?:\\.[0-9]{1,3}){2}|172\\.(?:1[6-9]|2[0-9]|3[01])(?:\\.[0-9]{1,3}){2})(?::[0-9]{1,5})?(?:[/\\s?#]|$)",
+      "action": 1,
+      "enabled": true,
+      "priority": 600,
+      "description": "拦截 URL 参数直接访问回环与 RFC1918 内网 IPv4；应用还应在解析后校验目标 IP"
+    },
+    {
+      "name": "SSRF 云元数据目标",
+      "category": "SSRF",
+      "target": "args",
+      "pattern": "(?i)\\bhttps?://(?:169\\.254\\.169\\.254|100\\.100\\.100\\.200|metadata\\.google\\.internal|metadata\\.azure\\.internal)(?::[0-9]{1,5})?(?:[/\\s?#]|$)",
+      "action": 1,
+      "enabled": true,
+      "priority": 610,
+      "description": "拦截常见云平台实例元数据地址；云侧同时应启用元数据访问保护"
+    },
+    {
+      "name": "SSRF 危险协议",
+      "category": "SSRF",
+      "target": "args",
+      "pattern": "(?i)\\b(?:file|gopher|dict|ldap|ldaps|ftp|tftp)://",
+      "action": 1,
+      "enabled": true,
+      "priority": 620,
+      "description": "拦截服务端取址参数中的文件、目录、邮件及原始协议入口"
+    },
+    {
+      "name": "SSRF 回环地址变体",
+      "category": "SSRF",
+      "target": "args",
+      "pattern": "(?i)\\bhttps?://(?:0x7f[0-9a-f.]*|2130706433|0177(?:\\.[0-7]{1,3}){0,3}|127\\.1)(?::[0-9]{1,5})?(?:[/\\s?#]|$)",
+      "action": 1,
+      "enabled": true,
+      "priority": 630,
+      "description": "识别十六进制、十进制、八进制与缩写形式的 IPv4 回环目标"
+    },
+    {
+      "name": "SSRF IPv6 本地目标",
+      "category": "SSRF",
+      "target": "args",
+      "pattern": "(?i)\\bhttps?://\\[(?:::1|::ffff:(?:127\\.[0-9.]+|7f[0-9a-f:]+)|fe80:[0-9a-f:]+)\\](?::[0-9]{1,5})?",
+      "action": 1,
+      "enabled": true,
+      "priority": 640,
+      "description": "拦截 IPv6 回环、链路本地与 IPv4 映射回环 URL"
+    },
+    {
+      "name": "XXE DOCTYPE 实体声明",
+      "category": "XXE/XML",
+      "target": "body",
+      "pattern": "(?is)<!DOCTYPE\\b.{0,1000}.{0,1000}<!ENTITY\\b",
+      "action": 1,
+      "enabled": true,
+      "priority": 700,
+      "description": "拦截带实体声明的 XML DTD；服务端解析器仍应禁用 DTD 与外部实体"
+    },
+    {
+      "name": "XXE 外部 SYSTEM PUBLIC 实体",
+      "category": "XXE/XML",
+      "target": "body",
+      "pattern": "(?is)<!ENTITY\\s+%?\\s*[A-Za-z_:][A-Za-z0-9_.:-]{0,100}.{0,256}\\b(?:SYSTEM|PUBLIC)\\s+[\"'](?:file|https?|ftp|gopher):",
+      "action": 1,
+      "enabled": true,
+      "priority": 710,
+      "description": "拦截指向文件、网络或原始协议的 XML 外部实体"
+    },
+    {
+      "name": "XML XInclude 外部引用",
+      "category": "XXE/XML",
+      "target": "body",
+      "pattern": "(?is)<(?:xi:include|xinclude)\\b[^>]{0,1000}\\bhref\\s*=\\s*[\"'](?:file|https?|ftp):",
+      "action": 1,
+      "enabled": true,
+      "priority": 720,
+      "description": "拦截 XInclude 对本地文件或外部 URL 的引用"
+    },
+    {
+      "name": "Java XMLDecoder 危险对象图",
+      "category": "XXE/XML",
+      "target": "body",
+      "pattern": "(?is)<java\\b[^>]{0,512}class\\s*=\\s*[\"']java\\.beans\\.XMLDecoder[\"'].{0,1000}.{0,1000}(?:ProcessBuilder|java\\.lang\\.Runtime)",
+      "action": 1,
+      "enabled": true,
+      "priority": 730,
+      "description": "识别 XMLDecoder 构造 ProcessBuilder 或 Runtime 的危险对象图"
+    },
+    {
+      "name": "Jinja Twig 模板执行链",
+      "category": "SSTI/表达式注入",
+      "target": "args",
+      "pattern": "(?is)\\{\\{.{0,512}(?:__class__|__mro__|__subclasses__|cycler|joiner|namespace|self\\.__init__|popen|os\\.)",
+      "action": 1,
+      "enabled": true,
+      "priority": 800,
+      "description": "拦截 Jinja/Twig 表达式中的对象遍历、系统模块与进程执行链"
+    },
+    {
+      "name": "Java EL SpEL 危险类型访问",
+      "category": "SSTI/表达式注入",
+      "target": "args",
+      "pattern": "(?is)(?:\\$\\{|#\\{).{0,512}(?:java\\.lang\\.(?:Runtime|ProcessBuilder)|getRuntime|ScriptEngineManager|Class\\.forName)",
+      "action": 1,
+      "enabled": true,
+      "priority": 810,
+      "description": "拦截 EL/SpEL 中对 Runtime、ProcessBuilder、脚本引擎与反射类加载的访问"
+    },
+    {
+      "name": "OGNL 命令执行表达式",
+      "category": "SSTI/表达式注入",
+      "target": "args",
+      "pattern": "(?is)%\\{.{0,768}(?:@java\\.lang\\.Runtime@|ProcessBuilder|ognlUtil|memberAccess|denyMethodExecution)",
+      "action": 1,
+      "enabled": true,
+      "priority": 820,
+      "description": "识别 Struts/OGNL 常见静态调用、访问控制修改与命令执行对象"
+    },
+    {
+      "name": "FreeMarker 高风险内建函数",
+      "category": "SSTI/表达式注入",
+      "target": "args",
+      "pattern": "(?is)(?:<#(?:assign|include|import)|\\?new\\s*\\(|freemarker\\.template\\.utility\\.Execute)",
+      "action": 1,
+      "enabled": true,
+      "priority": 830,
+      "description": "拦截 FreeMarker 动态加载、对象构造与 Execute 工具调用"
+    },
+    {
+      "name": "Velocity 模板指令审计",
+      "category": "SSTI/表达式注入",
+      "target": "args",
+      "pattern": "(?is)#(?:set|evaluate|parse)\\s*\\([^)]{0,512}(?:class|runtime|process|execute|getClass)",
+      "action": 2,
+      "enabled": true,
+      "priority": 5840,
+      "description": "记录 Velocity 指令中的反射或执行关键词；模板编辑业务可能合法使用"
+    },
+    {
+      "name": "JavaScript 原型污染键",
+      "category": "原型污染",
+      "target": "body",
+      "pattern": "(?i)\"__proto__\"\\s*:|\"constructor\"\\s*:\\s*\\{.{0,512}\"prototype\"\\s*:",
+      "action": 1,
+      "enabled": true,
+      "priority": 900,
+      "description": "拦截 JSON 中直接修改 __proto__ 或 constructor.prototype 的结构"
+    },
+    {
+      "name": "CRLF 响应头注入",
+      "category": "协议注入",
+      "target": "all",
+      "pattern": "(?i)(?:%0d%0a|%0a%0d|\\\\r\\\\n)(?:content-length|transfer-encoding|host|location|set-cookie)\\s*(?::|%3a)",
+      "action": 1,
+      "enabled": true,
+      "priority": 910,
+      "description": "识别编码换行后注入关键 HTTP 头的 CRLF 输入"
+    },
+    {
+      "name": "HTTP 方法覆盖头审计",
+      "category": "协议注入",
+      "target": "headers",
+      "pattern": "(?i)^(?:X-HTTP-Method-Override|X-Method-Override|X-HTTP-Method):\\s*(?:PUT|DELETE|PATCH|TRACE|CONNECT)\\b",
+      "action": 2,
+      "enabled": true,
+      "priority": 5920,
+      "description": "记录通过请求头覆盖为高风险 HTTP 方法的行为，默认不影响兼容旧客户端的 API"
+    },
+    {
+      "name": "上传服务端脚本扩展名",
+      "category": "文件上传",
+      "target": "body",
+      "pattern": "(?i)\"__jingshield_upload__\"\\s*:\\s*true.{0,512}\"filename\"\\s*:\\s*\"[^\"\\r\\n]{0,240}\\.(?:php[0-9]?|phtml|phar|jsp|jspx|jspf|asp|aspx|ashx|asmx|cgi|pl|py|rb|sh)\"",
+      "action": 1,
+      "enabled": true,
+      "priority": 1000,
+      "description": "拦截 multipart 文件名中的常见服务端脚本扩展名，包含双扩展名情形"
+    },
+    {
+      "name": "上传文件名路径与空字节",
+      "category": "文件上传",
+      "target": "body",
+      "pattern": "(?i)\"filename\"\\s*:\\s*\"[^\"\\r\\n]{0,240}(?:\\.\\./|\\\\\\\\|%2e%2e|%00|\\\\u0000)",
+      "action": 1,
+      "enabled": true,
+      "priority": 1010,
+      "description": "拦截上传文件名中的目录分隔穿越、编码父目录与空字节截断"
+    },
+    {
+      "name": "上传声明类型与内容不一致审计",
+      "category": "文件上传",
+      "target": "body",
+      "pattern": "\"__jingshield_upload__\"\\s*:\\s*true.{0,768}\"type_mismatch\"\\s*:\\s*true",
+      "action": 2,
+      "enabled": true,
+      "priority": 6020,
+      "description": "记录 Content-Type 与前 512 字节内容探测的大类不一致；确认业务文件类型后再阻断"
+    },
+    {
+      "name": "上传内容包含服务端脚本",
+      "category": "文件上传",
+      "target": "body",
+      "pattern": "(?is)__jingshield_upload_sample__:.{0,1000}.{0,1000}.{0,1000}.{0,1000}(?:<\\?(?:php|=)|<%[@=!]?|#!\\s*/(?:usr/)?bin/(?:sh|bash|python|perl))",
+      "action": 1,
+      "enabled": true,
+      "priority": 1030,
+      "description": "在上传文件前 4KB 中识别 PHP、JSP/ASP 脚本标记与解释器 shebang"
+    },
+    {
+      "name": "上传活动 HTML SVG 内容审计",
+      "category": "文件上传",
+      "target": "body",
+      "pattern": "(?is)__jingshield_upload_sample__:.{0,1000}.{0,1000}.{0,1000}.{0,1000}(?:<script\\b|<(?:svg|img)[^>]{0,512}\\bon(?:load|error)\\s*=|javascript\\s*:)",
+      "action": 2,
+      "enabled": true,
+      "priority": 6040,
+      "description": "记录上传文件中的活动 HTML/SVG 内容；是否阻断取决于文件的存储与响应方式"
+    },
+    {
+      "name": "GraphQL Introspection 审计",
+      "category": "GraphQL",
+      "target": "body",
+      "pattern": "(?is)\\b(?:query|mutation)\\b.{0,1000}.{0,1000}.{0,1000}.{0,1000}__(?:schema|type)\\b",
+      "action": 2,
+      "enabled": true,
+      "priority": 6100,
+      "description": "记录 GraphQL introspection 查询；生产环境是否关闭应结合客户端和网关需求"
+    },
+    {
+      "name": "GraphQL JSON 批处理审计",
+      "category": "GraphQL",
+      "target": "body",
+      "pattern": "(?is)\\[\\s*\\{\\s*\"(?:operationName|query|variables)\"\\s*:",
+      "action": 2,
+      "enabled": true,
+      "priority": 6110,
+      "description": "记录 GraphQL 顶层数组批处理请求，用于发现批量绕过限速或授权检查"
+    },
+    {
+      "name": "GraphQL 高深度查询审计",
+      "category": "GraphQL",
+      "target": "body",
+      "pattern": "(?is)\\{.{0,1000}\\{.{0,1000}\\{.{0,1000}\\{.{0,1000}\\{.{0,1000}\\{.{0,1000}\\{.{0,1000}\\{",
+      "action": 2,
+      "enabled": true,
+      "priority": 6120,
+      "description": "以单次请求出现至少八个选择集作为复杂查询启发式告警；精确深度仍需 GraphQL AST 分析"
+    },
+    {
+      "name": "GraphQL 别名放大审计",
+      "category": "GraphQL",
+      "target": "body",
+      "pattern": "(?is)(?:\\b[A-Za-z_][A-Za-z0-9_]*\\s*:\\s*[A-Za-z_][A-Za-z0-9_]*[^:{}]*){12}",
+      "action": 2,
+      "enabled": true,
+      "priority": 6130,
+      "description": "记录单次查询中大量别名调用的放大迹象；推荐应用侧实施字段成本和别名数量限制"
+    },
+    {
+      "name": "GraphQL 敏感变更字段审计",
+      "category": "GraphQL",
+      "target": "body",
+      "pattern": "(?is)\\bmutation\\b.{0,1000}.{0,1000}.{0,1000}.{0,1000}\\b(?:deleteUser|disableMfa|resetPassword|changeRole|grantPermission|createApiKey)\\b",
+      "action": 2,
+      "enabled": true,
+      "priority": 6140,
+      "description": "记录常见高影响 mutation 字段；字段级授权必须由 GraphQL 服务端实施"
+    }
+  ]
+}

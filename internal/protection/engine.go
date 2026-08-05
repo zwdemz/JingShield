@@ -46,16 +46,19 @@ type Decision struct {
 
 // Engine 防护引擎
 type Engine struct {
-	dynCfg    *config.DynamicConfig
-	ipList    *iplist.Service
-	cc        *cc.CCDetector
-	xss       detector.Detector
-	sql       detector.Detector
-	verify    *verify.Service
-	accessLog *repository.AccessLogRepo
-	attackLog *repository.AttackLogRepo
-	locator   iplib.Locator
-	policies  *policy.Service
+	dynCfg         *config.DynamicConfig
+	ipList         *iplist.Service
+	cc             *cc.CCDetector
+	xss            detector.Detector
+	sql            detector.Detector
+	pathTraversal  detector.Detector
+	ssrf           detector.Detector
+	xxe            detector.Detector
+	verify         *verify.Service
+	accessLog      *repository.AccessLogRepo
+	attackLog      *repository.AttackLogRepo
+	locator        iplib.Locator
+	policies       *policy.Service
 }
 
 // NewEngine 构造防护引擎
@@ -70,16 +73,19 @@ func NewEngine(
 	policies *policy.Service,
 ) *Engine {
 	return &Engine{
-		dynCfg:    dynCfg,
-		ipList:    ipListSvc,
-		cc:        ccDetector,
-		xss:       detector.NewXSSDetector(),
-		sql:       detector.NewSQLDetector(),
-		verify:    verifySvc,
-		accessLog: accessLog,
-		attackLog: attackLog,
-		locator:   locator,
-		policies:  policies,
+		dynCfg:        dynCfg,
+		ipList:        ipListSvc,
+		cc:            ccDetector,
+		xss:           detector.NewXSSDetector(),
+		sql:           detector.NewSQLDetector(),
+		pathTraversal: detector.NewPathTraversalDetector(),
+		ssrf:          detector.NewSSRFDetector(),
+		xxe:           detector.NewXXEDetector(),
+		verify:        verifySvc,
+		accessLog:     accessLog,
+		attackLog:     attackLog,
+		locator:       locator,
+		policies:      policies,
 	}
 }
 
@@ -190,7 +196,52 @@ func (e *Engine) Evaluate(ctx context.Context, rc *reqctx.RequestContext) Decisi
 		}
 	}
 
-	// 8. 通过全部检测，记录访问并放行
+	// 8. 路径穿越检测（语义） -> 403
+	if e.dynCfg.GetBool("path_traversal_protection_status") {
+		if r := e.pathTraversal.Check(ctx, rc); r != nil && r.Detected {
+			e.logAttackAsync(ctx, rc, r.AttackType, r.Detail)
+			e.logAccessAsync(ctx, rc, http.StatusForbidden)
+			return Decision{
+				Action:       DecisionBlock,
+				StatusCode:   http.StatusForbidden,
+				ErrorCode:    r.Code,
+				ErrorMessage: "非法路径访问",
+				AttackType:   r.AttackType,
+			}
+		}
+	}
+
+	// 9. SSRF 检测（语义） -> 403
+	if e.dynCfg.GetBool("ssrf_protection_status") {
+		if r := e.ssrf.Check(ctx, rc); r != nil && r.Detected {
+			e.logAttackAsync(ctx, rc, r.AttackType, r.Detail)
+			e.logAccessAsync(ctx, rc, http.StatusForbidden)
+			return Decision{
+				Action:       DecisionBlock,
+				StatusCode:   http.StatusForbidden,
+				ErrorCode:    r.Code,
+				ErrorMessage: "非法请求目标",
+				AttackType:   r.AttackType,
+			}
+		}
+	}
+
+	// 10. XXE/XML 注入检测（语义） -> 403
+	if e.dynCfg.GetBool("xxe_protection_status") {
+		if r := e.xxe.Check(ctx, rc); r != nil && r.Detected {
+			e.logAttackAsync(ctx, rc, r.AttackType, r.Detail)
+			e.logAccessAsync(ctx, rc, http.StatusForbidden)
+			return Decision{
+				Action:       DecisionBlock,
+				StatusCode:   http.StatusForbidden,
+				ErrorCode:    r.Code,
+				ErrorMessage: "非法 XML 内容",
+				AttackType:   r.AttackType,
+			}
+		}
+	}
+
+	// 11. 通过全部检测，记录访问并放行
 	e.logAccessAsync(ctx, rc, http.StatusOK)
 	return Decision{Action: DecisionAllow}
 }
@@ -213,30 +264,34 @@ func (e *Engine) logAccessAsync(ctx context.Context, rc *reqctx.RequestContext, 
 }
 
 func (e *Engine) logPolicyAsync(rc *reqctx.RequestContext, detail string, blocked bool) {
+	packet := rc.SanitizedRequestPacket()
 	go func() {
 		status := 2
 		if blocked {
 			status = 1
 		}
-		_, _ = e.attackLog.UpsertAttack(context.Background(), &model.AttackLog{IP: rc.IP, IPLocation: e.locator.Lookup(rc.IP), Host: rc.R.Host, URI: rc.URI, Method: rc.Method, AttackType: model.AttackTypePolicy, AttackDetail: detail, AttackCount: 1, Status: status})
+		_, _ = e.attackLog.UpsertAttack(context.Background(), &model.AttackLog{EventID: rc.EventID, IP: rc.IP, IPLocation: e.locator.Lookup(rc.IP), Host: rc.R.Host, URI: rc.URI, Method: rc.Method, AttackType: model.AttackTypePolicy, AttackDetail: detail, RequestPacket: packet, AttackCount: 1, Status: status})
 	}()
 }
 
 // logAttackAsync 异步记录攻击日志
 // 对应 PHP logAttack()
 func (e *Engine) logAttackAsync(ctx context.Context, rc *reqctx.RequestContext, attackType, detail string) {
+	packet := rc.SanitizedRequestPacket()
 	go func() {
 		ipLocation := e.locator.Lookup(rc.IP)
 		log := &model.AttackLog{
-			IP:           rc.IP,
-			IPLocation:   ipLocation,
-			Host:         rc.R.Host,
-			URI:          rc.URI,
-			Method:       rc.Method,
-			AttackType:   attackType,
-			AttackDetail: detail,
-			AttackCount:  1,
-			Status:       1,
+			EventID:       rc.EventID,
+			IP:            rc.IP,
+			IPLocation:    ipLocation,
+			Host:          rc.R.Host,
+			URI:           rc.URI,
+			Method:        rc.Method,
+			AttackType:    attackType,
+			AttackDetail:  detail,
+			RequestPacket: packet,
+			AttackCount:   1,
+			Status:        1,
 		}
 		_, _ = e.attackLog.UpsertAttack(context.Background(), log)
 	}()

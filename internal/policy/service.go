@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -133,15 +134,21 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 }
 
 func (s *Service) Import(ctx context.Context, pack RulePack, source string) (int, error) {
-	if pack.Schema != "jingshield.rules/v1" || len(pack.Version) < 1 || len(pack.Version) > 50 || len(pack.Rules) > 5000 {
+	if pack.Schema != "jingshield.rules/v1" || !validRulePackVersion(pack.Version) || len(pack.Rules) < 1 || len(pack.Rules) > 5000 {
 		return 0, errors.New("规则包 schema、版本或规则数量非法")
 	}
 	rules := make([]*model.PolicyRule, 0, len(pack.Rules))
+	names := make(map[string]struct{}, len(pack.Rules))
 	for _, input := range pack.Rules {
 		rule, err := ValidateRule(input)
 		if err != nil {
 			return 0, fmt.Errorf("规则 %q 非法: %w", input.Name, err)
 		}
+		nameKey := strings.ToLower(rule.Name)
+		if _, exists := names[nameKey]; exists {
+			return 0, fmt.Errorf("规则名称 %q 重复", rule.Name)
+		}
+		names[nameKey] = struct{}{}
 		rule.Source, rule.Version = source, pack.Version
 		rules = append(rules, rule)
 	}
@@ -150,6 +157,30 @@ func (s *Service) Import(ctx context.Context, pack RulePack, source string) (int
 	}
 	s.Invalidate()
 	return len(rules), nil
+}
+
+func validRulePackVersion(version string) bool {
+	if len(version) < 1 || len(version) > 50 {
+		return false
+	}
+	for _, char := range version {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '.' && char != '_' && char != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func decodeStrictJSON(data []byte, dst any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return errors.New("JSON 只能包含一个值")
+	}
+	return nil
 }
 
 func (s *Service) Invalidate() { s.mu.Lock(); s.loaded = time.Time{}; s.mu.Unlock() }
@@ -287,19 +318,22 @@ func (s *Service) UpdateNow(ctx context.Context) (string, int, error) {
 		return "", 0, errors.New("策略更新包超过 2MB")
 	}
 	var envelope signedEnvelope
-	if json.Unmarshal(body, &envelope) != nil {
+	if decodeStrictJSON(body, &envelope) != nil {
 		return "", 0, errors.New("策略更新包信封格式非法")
 	}
 	payload, err := decodeBase64(envelope.Payload)
 	if err != nil {
 		return "", 0, errors.New("策略更新 payload 非法")
 	}
+	if len(payload) > maxRulePack {
+		return "", 0, errors.New("策略更新 payload 超过 2MB")
+	}
 	signature, err := decodeBase64(envelope.Signature)
 	if err != nil || !ed25519.Verify(ed25519.PublicKey(publicKey), payload, signature) {
 		return "", 0, errors.New("策略更新签名校验失败")
 	}
 	var pack RulePack
-	if json.Unmarshal(payload, &pack) != nil {
+	if decodeStrictJSON(payload, &pack) != nil {
 		return "", 0, errors.New("策略更新 payload JSON 非法")
 	}
 	count, err := s.Import(ctx, pack, "auto")

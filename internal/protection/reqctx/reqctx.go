@@ -7,6 +7,8 @@ package reqctx
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,13 +16,17 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"jingshield/internal/pkg/iputil"
 )
 
 // RequestContext 请求防护上下文
 type RequestContext struct {
+	// EventID 用于关联客户端拦截页与后台攻击事件，不包含规则或请求信息。
+	EventID string
 	// 原始 HTTP 请求
 	R *http.Request
 	// 客户端 IP（经代理 header 解析后的真实 IP）
@@ -37,6 +43,8 @@ type RequestContext struct {
 	Post url.Values
 	// 非表单请求体中的可检测文本。原始请求体会恢复后继续转发。
 	BodyValues []string
+	// 原始请求体仅在当前请求生命周期内用于生成脱敏、限长的攻击报文。
+	RawBody []byte
 	// Cookie
 	Cookies []*http.Cookie
 	// 请求头
@@ -49,6 +57,7 @@ type RequestContext struct {
 // 对应 PHP initRequestInfo() + getClientIP()
 func NewRequestContext(r *http.Request, trustedProxies []string) (*RequestContext, error) {
 	rc := &RequestContext{
+		EventID:   newEventID(),
 		R:         r,
 		IP:        iputil.GetClientIP(r, trustedProxies),
 		UserAgent: r.Header.Get("User-Agent"),
@@ -71,6 +80,7 @@ func NewRequestContext(r *http.Request, trustedProxies []string) (*RequestContex
 	r.GetBody = func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(body)), nil
 	}
+	rc.RawBody = body
 
 	mediaType, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	switch mediaType {
@@ -80,7 +90,7 @@ func NewRequestContext(r *http.Request, trustedProxies []string) (*RequestContex
 		}
 	case "multipart/form-data":
 		if boundary := params["boundary"]; boundary != "" {
-			rc.Post = readMultipartValues(body, boundary)
+			rc.Post, rc.BodyValues = readMultipartValues(body, boundary)
 		}
 	case "application/json":
 		rc.BodyValues = jsonValues(body)
@@ -94,21 +104,96 @@ func NewRequestContext(r *http.Request, trustedProxies []string) (*RequestContex
 	return rc, nil
 }
 
-func readMultipartValues(body []byte, boundary string) url.Values {
+func newEventID() string {
+	random := make([]byte, 6)
+	if _, err := rand.Read(random); err != nil {
+		return "JS-" + time.Now().UTC().Format("20060102T150405.000000000")
+	}
+	return "JS-" + time.Now().UTC().Format("20060102T150405") + "-" + strings.ToUpper(hex.EncodeToString(random))
+}
+
+const multipartInspectionSampleLimit = 4096
+
+type uploadedFileMetadata struct {
+	Marker       bool   `json:"__jingshield_upload__"`
+	Field        string `json:"field"`
+	Filename     string `json:"filename"`
+	DeclaredType string `json:"declared_type"`
+	DetectedType string `json:"detected_type"`
+	Size         int64  `json:"size"`
+	TypeMismatch bool   `json:"type_mismatch"`
+}
+
+func readMultipartValues(body []byte, boundary string) (url.Values, []string) {
 	values := make(url.Values)
+	var inspected []string
 	mr := multipart.NewReader(bytes.NewReader(body), boundary)
 	for {
 		part, err := mr.NextPart()
 		if err != nil {
 			break
 		}
-		if part.FileName() == "" && part.FormName() != "" {
+		filename := part.FileName()
+		if _, disposition, parseErr := mime.ParseMediaType(part.Header.Get("Content-Disposition")); parseErr == nil && disposition["filename"] != "" {
+			// multipart.Part.FileName 会清理目录；规则引擎需要原值识别上传路径穿越。
+			filename = disposition["filename"]
+		}
+		if filename == "" && part.FormName() != "" {
 			value, _ := io.ReadAll(part)
 			values.Add(part.FormName(), string(value))
+		} else if filename != "" {
+			sample, _ := io.ReadAll(io.LimitReader(part, multipartInspectionSampleLimit))
+			remainder, _ := io.Copy(io.Discard, part)
+			declared := normalizeMediaType(part.Header.Get("Content-Type"))
+			detected := normalizeMediaType(http.DetectContentType(sample))
+			metadata := uploadedFileMetadata{
+				Marker:       true,
+				Field:        part.FormName(),
+				Filename:     filename,
+				DeclaredType: declared,
+				DetectedType: detected,
+				Size:         int64(len(sample)) + remainder,
+				TypeMismatch: uploadTypeMismatch(filename, declared, detected),
+			}
+			if encoded, marshalErr := json.Marshal(metadata); marshalErr == nil {
+				inspected = append(inspected, string(encoded))
+			}
+			if len(sample) > 0 {
+				inspected = append(inspected, "__jingshield_upload_sample__:"+string(sample))
+			}
 		}
 		_ = part.Close()
 	}
-	return values
+	return values, inspected
+}
+
+func normalizeMediaType(value string) string {
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil {
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+	return strings.ToLower(mediaType)
+}
+
+func uploadTypeMismatch(filename, declared, detected string) bool {
+	if declared == "" || declared == "application/octet-stream" || detected == "" || declared == detected {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(filename))
+	compatible := map[string]map[string]bool{
+		"application/json": {"text/plain": true},
+		"application/xml":  {"text/plain": true, "text/xml": true},
+		"text/xml":         {"application/xml": true, "text/plain": true},
+		"image/svg+xml":    {"text/plain": true, "text/xml": true},
+		"text/csv":         {"text/plain": true},
+	}
+	if compatible[declared][detected] {
+		return false
+	}
+	if detected == "application/zip" && map[string]bool{".docx": true, ".xlsx": true, ".pptx": true, ".jar": true, ".apk": true}[ext] {
+		return false
+	}
+	return strings.SplitN(declared, "/", 2)[0] != strings.SplitN(detected, "/", 2)[0]
 }
 
 func jsonValues(body []byte) []string {

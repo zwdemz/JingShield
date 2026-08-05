@@ -58,3 +58,11 @@ func TestUnknownCommandFails(t *testing.T) {
 		t.Fatal("unknown command unexpectedly succeeded")
 	}
 }
+
+func TestInitRequiresExplicitUsername(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := execute([]string{"init"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "--username") {
+		t.Fatalf("expected explicit username error, got %v", err)
+	}
+}

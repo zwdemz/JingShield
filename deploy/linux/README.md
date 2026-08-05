@@ -1,66 +1,93 @@
-# Linux systemd 部署
+# JingShield Linux release assets
 
-推荐目录：
+<p align="right"><strong>English</strong> · <a href="#中文">中文</a></p>
 
-- 二进制：`/opt/jingshield/bin/jingshield`
-- 配置：`/etc/jingshield/config.yaml`
-- 密钥环境文件：`/etc/jingshield/jingshield.env`（权限 `0600`）
-- 日志：`/var/log/jingshield`
+The repository-root `run.sh` and `upgrade.sh` are the lifecycle entry points. This directory contains the remaining configuration and systemd templates used to assemble the complete Linux release. Target servers do not build the frontend or Go program.
 
-构建 Linux amd64 二进制：
+The generated archive exposes two lifecycle commands:
+
+- `run.sh`: installs a complete package on first use; in `/opt/jingshield/`, migrates and restarts an installed node.
+- `upgrade.sh`: upgrades directly from a newly extracted complete package and automatically restores the previous binary if startup fails.
+
+Build an operator-ready package from the repository root:
+
+```powershell
+pwsh -File scripts/build-linux-package.ps1 -Arch amd64
+```
+
+The default `-NetworkProfile Auto` selects a reachable, faster Go module proxy for the current build. `Direct` and `China` are available as explicit overrides.
+
+Install it locally:
 
 ```bash
-cd web
-npm ci
-npm run build
-cd ..
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/jingshield-linux-amd64 ./cmd/jingshield
+tar -xzf jingshield-0.1.0-linux-amd64.tar.gz
+cd jingshield-0.1.0-linux-amd64
+sudo ./run.sh
 ```
 
-前端必须先构建；`web/dist` 会被嵌入二进制。部署后管理控制台与管理 API 共用服务端口，入口为 `/admin/`，并受 `admin_ips` 限制。
-
-测试配置同时监听 HTTP `18080` 和 HTTPS `18443`。安装脚本在证书不存在时生成 RSA 3072、SHA-256、有效期 10950 天（约 30 年）的自签名证书，文件位于 `/etc/jingshield/tls/`。它仅用于隔离测试，浏览器仍会提示不受信任；生产环境请替换为受信任证书，并将 `session.secure` 设为 `true`。
-
-环境文件至少包含：
-
-```ini
-JINGSHIELD_DB_PASS=<专用数据库密码>
-JINGSHIELD_SESSION_KEY=<至少 32 字节随机值>
-```
-
-安装配置和 systemd 单元后执行：
+Upgrade it later:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now jingshield
-sudo systemctl status jingshield --no-pager
+tar -xzf jingshield-<new-version>-linux-amd64.tar.gz
+cd jingshield-<new-version>-linux-amd64
+sudo ./upgrade.sh
 ```
 
-`install-remote-test.sh` 用于全新测试机：创建最小权限系统/数据库账号、生成随机密钥、
-执行幂等迁移和初始化、生成缺失的测试证书，并启动隔离测试上游与 WAF。脚本不会修改现有 80/443/8080 服务；
-若发现数据库账号已存在但密钥文件缺失，会拒绝重置账号密码。
+Installed paths:
 
-本目录的测试配置监听 `0.0.0.0:18080`，管理接口仅允许本机和
-`192.168.118.0/24`，上游为隔离的 `127.0.0.1:19000` 测试页。正式部署时应将
-监听地址、`admin_ips` 和 `upstream.target` 改成实际网络，并在 HTTPS 入口下将
-`session.secure` 设为 `true`。
+Application-owned production files are kept in one directory. `/opt/jingshield` is the default and `JINGSHIELD_INSTALL_ROOT` can select another absolute path; only the systemd unit is installed outside it.
 
-测试入口：
+- Binary: `/opt/jingshield/jingshield`
+- Configuration: `/opt/jingshield/config.yaml`
+- Secret environment file: `/opt/jingshield/jingshield.env` (`0640`)
+- Lifecycle scripts: `/opt/jingshield/run.sh` and `/opt/jingshield/upgrade.sh`
+- TLS, rules, data, logs, and backups: subdirectories or files under `/opt/jingshield/`
 
-- `http://<节点IP>:18080/admin/`
-- `https://<节点IP>:18443/admin/`
-- `https://<节点IP>:18443/openapi/v1/status`（请求头携带 `X-API-Key`）
+`config.yaml` listens on HTTP `18080` and HTTPS `18443`, uses `127.0.0.1:8080` as the initial fallback upstream, and permits management from loopback and RFC 1918 private networks. Tighten these values for the actual production network.
 
-源站必须通过主机防火墙、安全组或监听地址限制为仅允许 WAF 节点访问。若业务服务仍公开监听（例如 `*:8080`），访问者可以绕过 WAF 直连源站。
+The generated 30-year self-signed certificate is for isolated testing. Replace it with a trusted certificate and enable secure session cookies before production use. Restrict the real upstream so clients cannot bypass JingShield.
 
-## 运行与升级脚本
+`install-remote-test.sh` and the test upstream unit remain development fixtures; they are not included in the complete release package.
 
-节点已按推荐目录安装后：
+---
+
+<h2 id="中文">中文</h2>
+
+<p align="right"><a href="#jingshield-linux-release-assets">English</a> · <strong>中文</strong></p>
+
+仓库根目录的 `run.sh` 和 `upgrade.sh` 是生命周期入口。本目录保存其余 Linux 配置与 systemd 模板，目标服务器不需要构建前端或 Go 程序。
+
+生成的完整包只需要两个入口：
+
+- `run.sh`：首次执行安装完整包；安装到 `/opt/jingshield/` 后负责迁移和启动现有节点。
+- `upgrade.sh`：在新解压的完整包中直接升级；新版本启动失败时自动恢复旧二进制。
+
+维护者构建发行包：
+
+```powershell
+pwsh -File scripts/build-linux-package.ps1 -Arch amd64
+```
+
+默认 `-NetworkProfile Auto` 会为当前构建自动选择可用且更快的 Go 模块代理，也可以显式使用 `Direct` 或 `China`。
+
+目标机本地安装：
 
 ```bash
-sudo bash deploy/linux/run.sh
-sudo bash deploy/linux/run.sh --init --username admin  # 仅首次空库
-sudo bash deploy/linux/upgrade.sh /absolute/path/to/jingshield-linux-amd64
+tar -xzf jingshield-0.1.0-linux-amd64.tar.gz
+cd jingshield-0.1.0-linux-amd64
+sudo ./run.sh
 ```
 
-`run.sh` 会生成缺失的 30 年 PEM 测试证书、执行幂等迁移并重启 systemd 服务。`upgrade.sh` 使用独占锁，先用候选版本迁移，再备份、停止、原子替换和启动；新版本启动失败时自动恢复备份。
+后续升级：
+
+```bash
+tar -xzf jingshield-<新版本>-linux-amd64.tar.gz
+cd jingshield-<新版本>-linux-amd64
+sudo ./upgrade.sh
+```
+
+应用生产文件默认全部集中在 `/opt/jingshield`，也可以通过 `JINGSHIELD_INSTALL_ROOT` 选择其他绝对目录；目录外只安装 systemd 必需的服务单元。
+
+默认配置监听 HTTP `18080` 和 HTTPS `18443`，初始兼容源站为 `127.0.0.1:8080`，管理访问允许回环地址和 RFC 1918 私有网段。生产部署必须根据实际网络收紧配置、替换自签测试证书，并限制真实源站只能由 WAF 访问。
+
+`install-remote-test.sh` 和测试上游单元仅供开发验证，不会进入完整发行包。

@@ -30,3 +30,18 @@ func TestHandlerDoesNotFallbackForMissingAsset(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
 	}
 }
+
+func TestHandlerServesFaviconAssets(t *testing.T) {
+	h := Handler()
+	for _, target := range []string{"/favicon.svg", "/favicon.ico", "/favicon.png"} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d", target, rr.Code)
+		}
+		if rr.Body.Len() == 0 {
+			t.Fatalf("GET %s returned an empty body", target)
+		}
+	}
+}

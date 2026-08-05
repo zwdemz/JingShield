@@ -25,7 +25,12 @@ docs/
 
 # Build outputs and dependency caches
 bin/
+release/
 web/node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
 .gocache*/
 .gotmp*/
 coverage/
