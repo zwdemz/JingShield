@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>安全验证 - 捷云鲸盾</title>
+    <meta name="theme-color" content="#3c48b5">
+    <meta name="msapplication-TileColor" content="#3c48b5">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="X-UA-Compatible" content="IE-edge,chrome=1">
+    <style>
+        html, body, h1 {
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #d5d4ff;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            padding: 20px;
+        }
+        #demo {
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 30px;
+            border: 1px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 16px;
+            background-color: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        .verification-title {
+            font-size: 28px;
+            margin-bottom: 20px;
+            color: #ffffff;
+            font-weight: 700;
+        }
+        .verification-desc {
+            font-size: 16px;
+            margin-bottom: 30px;
+            color: #e0e0e0;
+            line-height: 1.6;
+        }
+        /* 滑动验证容器 */
+        #captcha-container {
+            width: 100%;
+            margin: 0 auto;
+        }
+        /* 背景图容器 */
+        #captcha-background {
+            width: 100%;
+            height: 200px;
+            background-color: #f5f5f5;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        /* 背景图 */
+        #captcha-image {
+            width: 100%;
+            height: 100%;
+            background-image: linear-gradient(45deg, #ff9a9e 0%, #fecfef 50%, #fecfef 100%);
+            position: relative;
+        }
+        /* 缺口 */
+        #captcha-gap {
+            width: 60px;
+            height: 60px;
+            position: absolute;
+            background-color: transparent;
+            border: 2px dashed #ff4d4f;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+        /* 滑块容器 */
+        #slider-container {
+            width: 100%;
+            height: 60px;
+            margin-top: 25px;
+            position: relative;
+        }
+        /* 滑块轨道 */
+        #slider-track {
+            width: 100%;
+            height: 60px;
+            background-color: #f0f0f0;
+            border-radius: 30px;
+            position: relative;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        /* 滑块 */
+        #slider {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #ffffff 0%, #f0f0f0 100%);
+            border: 2px solid #d9d9d9;
+            border-radius: 30px;
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: transform 0.1s ease, box-shadow 0.3s ease;
+        }
+        /* 滑块图标 */
+        #slider::after {
+            content: ">>";
+            font-size: 24px;
+            color: #1890ff;
+            font-weight: bold;
+        }
+        /* 滑块按下状态 */
+        #slider:active {
+            transform: scale(1.1);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+        }
+        /* 滑块提示文本 */
+        #slider-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 18px;
+            color: #666;
+            user-select: none;
+            font-weight: 500;
+        }
+        /* 验证结果提示 */
+        #verification-result {
+            margin-top: 25px;
+            font-size: 16px;
+            font-weight: 500;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            #demo {
+                padding: 25px 20px;
+                margin: 0 15px;
+            }
+            
+            .verification-title {
+                font-size: 24px;
+            }
+            
+            .verification-desc {
+                font-size: 14px;
+                margin-bottom: 25px;
+            }
+            
+            #captcha-background {
+                height: 180px;
+            }
+            
+            #slider-container {
+                height: 50px;
+                margin-top: 20px;
+            }
+            
+            #slider-track {
+                height: 50px;
+                border-radius: 25px;
+            }
+            
+            #slider {
+                width: 50px;
+                height: 50px;
+                border-radius: 25px;
+            }
+            
+            #slider::after {
+                font-size: 20px;
+            }
+            
+            #slider-text {
+                font-size: 16px;
+            }
+            
+            #verification-result {
+                font-size: 14px;
+                margin-top: 20px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            #demo {
+                padding: 20px 15px;
+            }
+            
+            .verification-title {
+                font-size: 20px;
+            }
+            
+            #captcha-background {
+                height: 150px;
+            }
+            
+            #slider-container {
+                height: 45px;
+            }
+            
+            #slider-track {
+                height: 45px;
+                border-radius: 22.5px;
+            }
+            
+            #slider {
+                width: 45px;
+                height: 45px;
+                border-radius: 22.5px;
+            }
+            
+            #slider::after {
+                font-size: 18px;
+            }
+            
+            #slider-text {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="demo">
+        <h2 class="verification-title">人机验证系统</h2>
+        <p class="verification-desc">请按住滑块，拖动到指定位置完成验证</p>
+        <div id="captcha-container">
+            <div id="captcha-background">
+                <div id="captcha-image"></div>
+                <div id="captcha-gap"></div>
+            </div>
+            <div id="slider-container">
+                <div id="slider-track"></div>
+                <div id="slider"></div>
+                <div id="slider-text">请拖动滑块</div>
+            </div>
+            <div id="verification-result"></div>
+        </div>
+    </div>
+    
+    <script>
+        // 从PHP全局变量获取验证信息
+        var token = '<?php echo $GLOBALS["cc_verify_token"]; ?>';
+        var redirect = '<?php echo $GLOBALS["cc_verify_redirect"]; ?>';
+    </script>
+    <script src="/ccpro/safe/ccjs/cc7.js"></script>
+</body>
+</html>

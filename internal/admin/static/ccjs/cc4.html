@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>安全验证 - 捷云鲸盾</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .jsredirect-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .jsredirect-title {
+            font-size: 28px;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-weight: 700;
+        }
+        .jsredirect-desc {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+        .loading {
+            display: inline-block;
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(24, 144, 255, 0.2);
+            border-top: 5px solid #1890ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            box-shadow: 0 0 15px rgba(24, 144, 255, 0.3);
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .jsredirect-container {
+                padding: 30px 20px;
+                margin: 0 15px;
+            }
+            
+            .jsredirect-title {
+                font-size: 24px;
+            }
+            
+            .jsredirect-desc {
+                font-size: 14px;
+                margin-bottom: 25px;
+            }
+            
+            .loading {
+                width: 40px;
+                height: 40px;
+                border-width: 4px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .jsredirect-container {
+                padding: 25px 15px;
+            }
+            
+            .jsredirect-title {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="jsredirect-container">
+        <h2 class="jsredirect-title">安全验证</h2>
+        <p class="jsredirect-desc">正在进行安全验证，请稍候...</p>
+        <div class="loading"></div>
+    </div>
+    
+    <script>
+        // 从PHP全局变量获取验证信息
+        var token = '<?php echo $GLOBALS["cc_verify_token"]; ?>';
+        var redirect = '<?php echo $GLOBALS["cc_verify_redirect"]; ?>';
+    </script>
+    <script src="/ccpro/safe/ccjs/cc4.js"></script>
+</body>
+</html>

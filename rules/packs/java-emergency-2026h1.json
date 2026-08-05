@@ -1,0 +1,116 @@
+{
+  "schema": "jingshield.rules/v1",
+  "version": "java-emergency-2026h1.1",
+  "rules": [
+    {
+      "name": "Fastjson URL 特殊类型名 RCE",
+      "category": "CVE-2026-16723",
+      "target": "body",
+      "pattern": "(?i)\"(?:@type|\\\\u0040type)\"\\s*:\\s*\"[^\"\\r\\n]{0,512}[:!][^\"\\r\\n]{0,512}\"",
+      "action": 1,
+      "enabled": true,
+      "priority": 100,
+      "description": "拦截 fastjson 1.2.68-1.2.83 漏洞类型名中的 URL 特殊字符；仍须升级 1.2.84、启用 SafeMode 或迁移 fastjson2"
+    },
+    {
+      "name": "Fastjson 高风险 AutoType 基类",
+      "category": "Fastjson AutoType",
+      "target": "body",
+      "pattern": "(?i)\"(?:@type|\\\\u0040type)\"\\s*:\\s*\"[^\"\\r\\n]{0,512}(?:ClassLoader|DataSource|RowSet|JdbcRowSetImpl)[^\"\\r\\n]{0,512}\"",
+      "action": 1,
+      "enabled": true,
+      "priority": 110,
+      "description": "拦截厂商修复说明涉及的 ClassLoader、DataSource 与 RowSet 等高风险 AutoType 类型"
+    },
+    {
+      "name": "Java JNDI 表达式探测",
+      "category": "Java RCE Baseline",
+      "target": "all",
+      "pattern": "(?i)\\$\\{(?:jndi|lower|upper|env|sys):",
+      "action": 1,
+      "enabled": true,
+      "priority": 120,
+      "description": "Java 服务通用 JNDI/变量表达式高风险基线，不代替 Log4j 等依赖升级"
+    },
+    {
+      "name": "Spring Boot 敏感 Actuator 端点",
+      "category": "Spring Boot Baseline",
+      "target": "uri",
+      "pattern": "(?i)^/actuator/(?:env|heapdump|jolokia|gateway|logfile|mappings|configprops|beans)(?:[/?]|$)",
+      "action": 1,
+      "enabled": true,
+      "priority": 130,
+      "description": "阻断常见敏感 Actuator 管理端点；生产环境还应在应用侧关闭公开暴露并配置鉴权"
+    },
+    {
+      "name": "Tomcat Manager 管理面暴露",
+      "category": "Tomcat Baseline",
+      "target": "uri",
+      "pattern": "(?i)^/(?:manager|host-manager)/(?:html|text|jmxproxy)(?:[/?]|$)",
+      "action": 1,
+      "enabled": true,
+      "priority": 140,
+      "description": "阻断经业务 WAF 暴露的 Tomcat Manager/Host Manager；运维入口应走独立管理网络"
+    },
+    {
+      "name": "Tomcat 示例应用攻击面",
+      "category": "CVE-2026-50229/CVE-2026-66299",
+      "target": "uri",
+      "pattern": "(?i)^/examples(?:[/?]|$)",
+      "action": 1,
+      "enabled": true,
+      "priority": 150,
+      "description": "阻断 Tomcat examples 应用，覆盖近期 number guess XSS 与 WebSocket chat DoS 暴露面；首选从服务器删除 examples"
+    },
+    {
+      "name": "Tomcat WebDAV 无界读取",
+      "category": "CVE-2026-41284",
+      "target": "method",
+      "pattern": "(?i)^(?:LOCK|PROPFIND)$",
+      "action": 1,
+      "enabled": true,
+      "priority": 160,
+      "description": "阻断易触发旧版 Tomcat WebDAV 无界请求体读取的 LOCK/PROPFIND；合法 WebDAV 业务应停用此规则并完成升级"
+    },
+    {
+      "name": "Tomcat Partial PUT 风险",
+      "category": "CVE-2025-24813 Baseline",
+      "target": "all",
+      "pattern": "(?is)\\nPUT\\n.*\\nContent-Range\\s*:",
+      "action": 1,
+      "enabled": true,
+      "priority": 170,
+      "description": "阻断带 Content-Range 的 partial PUT 历史高风险路径；需要断点上传的业务应在升级后按站点精细放行"
+    },
+    {
+      "name": "Tomcat 高风险 HTTP 方法审计",
+      "category": "CVE-2026-55956/CVE-2026-43515",
+      "target": "method",
+      "pattern": "(?i)^(?:PUT|DELETE|PATCH|TRACE|CONNECT)$",
+      "action": 2,
+      "enabled": true,
+      "priority": 500,
+      "description": "仅记录可能受安全约束方法处理缺陷影响的请求，避免误伤 REST API；应升级 Tomcat 并检查 web.xml"
+    },
+    {
+      "name": "Tomcat RewriteValve 加号解码审计",
+      "category": "CVE-2026-59083",
+      "target": "uri",
+      "pattern": "(?i)^[^?\\r\\n]*\\+",
+      "action": 2,
+      "enabled": true,
+      "priority": 510,
+      "description": "仅记录路径部分包含加号的请求，用于排查 RewriteValve 解码绕过；查询字符串中的正常加号不会命中"
+    },
+    {
+      "name": "Fastjson AutoType 使用审计",
+      "category": "Fastjson Hardening",
+      "target": "body",
+      "pattern": "(?i)\"(?:@type|\\\\u0040type)\"\\s*:",
+      "action": 2,
+      "enabled": true,
+      "priority": 520,
+      "description": "仅记录其余 @type 输入，用于识别 AutoType 业务依赖和潜在绕过，不直接阻断普通多态 JSON"
+    }
+  ]
+}
