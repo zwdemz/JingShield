@@ -1,0 +1,40 @@
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.env
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.csr
+cookie*.txt
+deploy/windows/jingshield.env.ps1
+
+# Runtime data and logs
+logs/
+*.log
+*.pid
+data/QQWry.Dat
+qqwry.dat
+
+# Private project documentation
+docs/
+
+# Build outputs and dependency caches
+bin/
+web/node_modules/
+.gocache*/
+.gotmp*/
+coverage/
+*.coverprofile
+*.exe
+*.exe~
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>安全验证 - 捷云鲸盾</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .click-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .click-title {
+            font-size: 28px;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-weight: 700;
+        }
+        .click-desc {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+        .click-btn {
+            display: inline-block;
+            padding: 18px 50px;
+            background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            font-size: 20px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(24, 144, 255, 0.4);
+            width: 100%;
+            max-width: 300px;
+        }
+        .click-btn:hover {
+            background: linear-gradient(135deg, #40a9ff 0%, #69c0ff 100%);
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(24, 144, 255, 0.6);
+        }
+        .click-btn:active {
+            transform: translateY(-1px);
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .click-container {
+                padding: 30px 20px;
+                margin: 0 15px;
+            }
+            
+            .click-title {
+                font-size: 24px;
+            }
+            
+            .click-desc {
+                font-size: 14px;
+                margin-bottom: 25px;
+            }
+            
+            .click-btn {
+                padding: 15px 40px;
+                font-size: 18px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .click-container {
+                padding: 25px 15px;
+            }
+            
+            .click-title {
+                font-size: 20px;
+            }
+            
+            .click-btn {
+                padding: 12px 30px;
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="click-container">
+        <h2 class="click-title">安全验证</h2>
+        <p class="click-desc">请点击下方按钮完成安全验证，验证通过后将自动跳转到目标页面。</p>
+        <button class="click-btn" id="clickBtn">点击验证</button>
+    </div>
+    
+    <script src="/ccpro/safe/ccjs/cc3.js"></script>
+</body>
+</html>

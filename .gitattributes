@@ -1,0 +1,15 @@
+* text=auto
+
+# Keep Linux deployment artifacts executable-friendly on Windows checkouts.
+*.sh text eol=lf
+*.service text eol=lf
+
+# Keep source and configuration diffs stable across platforms.
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+

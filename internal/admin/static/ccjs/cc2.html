@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>安全验证 - 捷云鲸盾</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .verify-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .verify-title {
+            font-size: 28px;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-weight: 700;
+        }
+        .verify-desc {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+        .verify-target {
+            font-size: 40px;
+            color: #1890ff;
+            font-weight: bold;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .verify-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 18px;
+            width: 280px;
+            margin: 0 auto 30px;
+        }
+        .verify-btn {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #e8e8e8 0%, #d9d9d9 100%);
+            border: 3px solid #ccc;
+            border-radius: 12px;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .verify-btn:hover {
+            background: linear-gradient(135deg, #d9d9d9 0%, #bfbfbf 100%);
+            border-color: #999;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        .verify-btn.correct {
+            background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+            border-color: #52c41a;
+            color: white;
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(82, 196, 26, 0.4);
+        }
+        .verify-btn.wrong {
+            background: linear-gradient(135deg, #f5222d 0%, #cf1322 100%);
+            border-color: #f5222d;
+            color: white;
+            animation: shake 0.5s;
+        }
+        .verify-status {
+            color: #666;
+            font-size: 14px;
+            margin-top: 20px;
+            font-weight: 500;
+        }
+        
+        /* 错误动画 */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .verify-container {
+                padding: 30px 20px;
+                margin: 0 15px;
+            }
+            
+            .verify-title {
+                font-size: 24px;
+            }
+            
+            .verify-desc {
+                font-size: 14px;
+                margin-bottom: 25px;
+            }
+            
+            .verify-target {
+                font-size: 32px;
+                margin-bottom: 25px;
+            }
+            
+            .verify-grid {
+                width: 240px;
+                gap: 15px;
+            }
+            
+            .verify-btn {
+                width: 50px;
+                height: 50px;
+                font-size: 20px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .verify-container {
+                padding: 25px 15px;
+            }
+            
+            .verify-title {
+                font-size: 20px;
+            }
+            
+            .verify-target {
+                font-size: 28px;
+            }
+            
+            .verify-grid {
+                width: 200px;
+                gap: 12px;
+            }
+            
+            .verify-btn {
+                width: 42px;
+                height: 42px;
+                font-size: 18px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="verify-container">
+        <h2 class="verify-title">安全验证</h2>
+        <p class="verify-desc">请点击下方网格中与目标数字相同的数字：</p>
+        <div class="verify-target" id="targetNumber"></div>
+        <div class="verify-grid" id="verifyGrid"></div>
+        <div class="verify-status" id="verifyStatus"></div>
+    </div>
+    
+    <script src="/ccpro/safe/ccjs/cc2.js"></script>
+</body>
+</html>
