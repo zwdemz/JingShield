@@ -111,10 +111,7 @@ def main() -> None:
     client.load_system_host_keys()
     if known_hosts.is_file():
         client.load_host_keys(str(known_hosts))
-    if args.accept_new_host_key:
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    else:
-        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
 
     connect_options: dict[str, object] = {
         "hostname": args.host,
