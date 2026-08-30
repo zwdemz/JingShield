@@ -56,9 +56,11 @@ func unicodePercentDecode(s string) string {
 	for i < len(s) {
 		if i+5 < len(s) && s[i] == '%' && (s[i+1] == 'u' || s[i+1] == 'U') {
 			if v, err := strconv.ParseUint(s[i+2:i+6], 16, 32); err == nil {
-				b.WriteRune(rune(v))
-				i += 6
-				continue
+				if v <= 0x10FFFF {
+					b.WriteRune(rune(v))
+					i += 6
+					continue
+				}
 			}
 		}
 		b.WriteByte(s[i])
