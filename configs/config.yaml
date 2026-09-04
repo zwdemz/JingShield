@@ -1,0 +1,87 @@
+# 鲸盾 Web 安全防护系统 - Go 版运行配置
+# 静态配置：仅启动时加载，修改后需重启或执行 reload
+
+# 服务监听配置
+server:
+  # 反向代理监听地址（对外提供防护的端口）
+  listen: "127.0.0.1:18080"
+  # 后台管理监听地址（可与 listen 相同，通过路由区分；生产建议同端口）
+  admin_listen: "127.0.0.1:18080"
+  # 可选 HTTPS 监听；启用时同时配置证书和私钥路径
+  tls_listen: "127.0.0.1:18443"
+  tls_cert_file: "./tls/jingshield.crt"
+  tls_key_file: "./tls/jingshield.key"
+  # 读取/写入超时（秒）
+  read_timeout: 30
+  write_timeout: 30
+  # 请求体最大尺寸（字节），超出拒绝，防大包攻击
+  max_body_bytes: 10485760
+  # 可信反向代理/CDN 节点。只有请求直接来自这些地址时才读取 X-Forwarded-For。
+  # 直连部署请保持为空，避免客户端伪造来源 IP。
+  trusted_proxies: []
+
+# 反向代理目标（被保护的真实站点）
+# Go WAF 将"干净请求"转发至此 upstream，攻击请求在代理层拦截
+upstream:
+  # 目标地址，示例指向本机 PHP 站点
+  target: "http://127.0.0.1:9000"
+  # 转发超时（秒）
+  timeout: 30
+  # 透传 Host 头（false 时用 upstream 的 host）
+  # 默认不把外部 Host 透传给源站，避免源站虚拟主机被客户端劫持。
+  pass_host: false
+
+# 数据库配置
+database:
+  host: "127.0.0.1"
+  port: 3306
+  user: "jingshield"
+  # 部署成功后 run.sh 会将数据库密码写入此处；JINGSHIELD_DB_PASS 可临时覆盖
+  pass: "JingShield@2026_Reset"
+  name: "jyj_ccpro"
+  charset: "utf8mb4"
+  # 连接池
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 300 # 秒
+
+# 后台管理 IP 白名单（CIDR / 通配符 / 单 IP）
+admin_ips:
+  - "127.0.0.1"
+  - "10.0.0.0/8"
+  - "192.168.0.0/16"
+
+# 日志配置
+log:
+  # 日志级别：debug/info/warn/error
+  level: "info"
+  # 日志目录
+  dir: "./logs"
+  # 日志文件最大尺寸（MB）
+  max_size_mb: 100
+  # 保留旧日志文件数
+  max_backups: 10
+  # 保留天数
+  max_age_days: 30
+
+# 缓存与状态目录（QQWry 数据文件、临时文件等）
+data:
+  # 纯真 IP 库数据文件路径
+  qqwry_dat: "./data/QQWry.Dat"
+  # 内存状态清理周期（秒），过期滑动窗口数据清理
+  state_gc_interval: 60
+
+# 会话配置
+session:
+  # session cookie 名称
+  name: "jingshield_session"
+  # 加密密钥（HMAC 签名用），生产务必修改；可通过环境变量 JINGSHIELD_SESSION_KEY 覆盖
+  secret: ""
+  # 有效期（秒）
+  max_age: 7200
+  # cookie 域名（留空则当前域）
+  domain: ""
+  # 是否启用 Secure（仅 HTTPS 传输）
+  secure: false
+  # 验证 cookie（cc_verified）有效期（秒）
+  verify_cookie_max_age: 3600

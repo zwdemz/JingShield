@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>安全验证 - 捷云鲸盾</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .security-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            text-align: center;
+            max-width: 600px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .security-title {
+            font-size: 28px;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-weight: 700;
+        }
+        .security-desc {
+            color: #666;
+            margin-bottom: 40px;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+        .security-progress {
+            margin-bottom: 30px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 24px;
+            background: rgba(24, 144, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 15px;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #1890ff, #52c41a);
+            border-radius: 12px;
+            width: 0%;
+            transition: width 0.3s ease;
+            box-shadow: 0 0 10px rgba(24, 144, 255, 0.4);
+        }
+        .progress-text {
+            color: #333;
+            font-size: 16px;
+            font-weight: 500;
+        }
+        .security-checks {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            margin-bottom: 40px;
+            text-align: left;
+        }
+        .check-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        .check-item:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+        .check-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        .check-icon.loading {
+            background: linear-gradient(135deg, #faad14 0%, #ffc53d 100%);
+            color: white;
+            animation: pulse 1.5s infinite;
+        }
+        .check-icon.success {
+            background: linear-gradient(135deg, #52c41a 0%, #73d13d 100%);
+            color: white;
+        }
+        .check-icon.error {
+            background: linear-gradient(135deg, #f5222d 0%, #ff4d4f 100%);
+            color: white;
+        }
+        .check-text {
+            color: #333;
+            font-size: 15px;
+            font-weight: 500;
+        }
+        .security-result {
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            display: none;
+            font-size: 16px;
+            font-weight: 500;
+        }
+        .security-result.success {
+            background: rgba(183, 235, 143, 0.2);
+            border: 2px solid #52c41a;
+            color: #389e0d;
+            display: block;
+        }
+        .security-result.error {
+            background: rgba(255, 204, 199, 0.2);
+            border: 2px solid #f5222d;
+            color: #cf1322;
+            display: block;
+        }
+        .action-btn {
+            display: inline-block;
+            padding: 16px 40px;
+            background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(24, 144, 255, 0.4);
+            width: 100%;
+            max-width: 300px;
+        }
+        .action-btn:hover {
+            background: linear-gradient(135deg, #40a9ff 0%, #69c0ff 100%);
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(24, 144, 255, 0.6);
+        }
+        .action-btn:active {
+            transform: translateY(-1px);
+        }
+        .action-btn.disabled {
+            background: linear-gradient(135deg, #d9d9d9 0%, #bfbfbf 100%);
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+        
+        /* 动画效果 */
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .security-container {
+                padding: 30px 20px;
+                margin: 0 15px;
+            }
+            
+            .security-title {
+                font-size: 24px;
+            }
+            
+            .security-desc {
+                font-size: 14px;
+                margin-bottom: 30px;
+            }
+            
+            .progress-bar {
+                height: 20px;
+            }
+            
+            .progress-text {
+                font-size: 14px;
+            }
+            
+            .security-checks {
+                gap: 12px;
+                margin-bottom: 30px;
+            }
+            
+            .check-item {
+                padding: 10px 14px;
+            }
+            
+            .check-icon {
+                width: 26px;
+                height: 26px;
+                font-size: 14px;
+            }
+            
+            .check-text {
+                font-size: 14px;
+            }
+            
+            .security-result {
+                padding: 20px;
+                font-size: 14px;
+            }
+            
+            .action-btn {
+                padding: 14px 35px;
+                font-size: 16px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .security-container {
+                padding: 25px 15px;
+            }
+            
+            .security-title {
+                font-size: 20px;
+            }
+            
+            .check-item {
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="security-container">
+        <h2 class="security-title">安全检测防护</h2>
+        <p class="security-desc">正在对您的设备和浏览器环境进行安全检测，请稍候...</p>
+        
+        <div class="security-progress">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressText">0% 检测中...</div>
+        </div>
+        
+        <div class="security-checks">
+            <div class="check-item">
+                <div class="check-icon loading" id="check1">1</div>
+                <div class="check-text">浏览器环境检测...</div>
+            </div>
+            <div class="check-item">
+                <div class="check-icon loading" id="check2">2</div>
+                <div class="check-text">设备指纹验证...</div>
+            </div>
+            <div class="check-item">
+                <div class="check-icon loading" id="check3">3</div>
+                <div class="check-text">网络环境安全检测...</div>
+            </div>
+            <div class="check-item">
+                <div class="check-icon loading" id="check4">4</div>
+                <div class="check-text">行为模式分析...</div>
+            </div>
+            <div class="check-item">
+                <div class="check-icon loading" id="check5">5</div>
+                <div class="check-text">恶意软件扫描...</div>
+            </div>
+        </div>
+        
+        <div class="security-result" id="securityResult"></div>
+        
+        <button class="action-btn" id="actionBtn" style="display: none;">完成验证</button>
+    </div>
+    
+    <script src="/ccpro/safe/ccjs/cc6.js"></script>
+</body>
+</html>

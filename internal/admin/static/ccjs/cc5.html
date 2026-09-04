@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>安全验证 - 捷云鲸盾</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .rotate-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .rotate-title {
+            font-size: 28px;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-weight: 700;
+        }
+        .rotate-desc {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+        .rotate-image-container {
+            position: relative;
+            width: 240px;
+            height: 240px;
+            margin: 0 auto 30px;
+            overflow: hidden;
+            border: 3px solid #1890ff;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(24, 144, 255, 0.3);
+            background: #fafafa;
+        }
+        .rotate-image {
+            width: 100%;
+            height: 100%;
+            transition: transform 0.1s ease;
+            object-fit: cover;
+        }
+        .rotate-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+        .rotate-btn {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+        }
+        .rotate-btn:hover {
+            background: linear-gradient(135deg, #40a9ff 0%, #69c0ff 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 18px rgba(24, 144, 255, 0.4);
+        }
+        .rotate-angle {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            padding: 8px 16px;
+            background: #f0f0f0;
+            border-radius: 20px;
+            min-width: 80px;
+        }
+        .confirm-btn {
+            display: inline-block;
+            padding: 16px 40px;
+            background: linear-gradient(135deg, #52c41a 0%, #73d13d 100%);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(82, 196, 26, 0.3);
+            width: 100%;
+            max-width: 250px;
+        }
+        .confirm-btn:hover {
+            background: linear-gradient(135deg, #73d13d 0%, #95de64 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(82, 196, 26, 0.5);
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .rotate-container {
+                padding: 30px 20px;
+                margin: 0 15px;
+            }
+            
+            .rotate-title {
+                font-size: 24px;
+            }
+            
+            .rotate-desc {
+                font-size: 14px;
+                margin-bottom: 25px;
+            }
+            
+            .rotate-image-container {
+                width: 200px;
+                height: 200px;
+            }
+            
+            .rotate-controls {
+                gap: 20px;
+                margin-bottom: 25px;
+            }
+            
+            .rotate-btn {
+                width: 45px;
+                height: 45px;
+                font-size: 24px;
+            }
+            
+            .rotate-angle {
+                font-size: 20px;
+                padding: 6px 12px;
+            }
+            
+            .confirm-btn {
+                padding: 14px 35px;
+                font-size: 16px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .rotate-container {
+                padding: 25px 15px;
+            }
+            
+            .rotate-title {
+                font-size: 20px;
+            }
+            
+            .rotate-image-container {
+                width: 180px;
+                height: 180px;
+            }
+            
+            .rotate-controls {
+                gap: 15px;
+            }
+            
+            .rotate-btn {
+                width: 40px;
+                height: 40px;
+                font-size: 20px;
+            }
+            
+            .rotate-angle {
+                font-size: 18px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="rotate-container">
+        <h2 class="rotate-title">安全验证</h2>
+        <p class="rotate-desc">请旋转图片，使其恢复到正确的方向，然后点击确认按钮完成验证。</p>
+        <div class="rotate-image-container">
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iIzE4OTBmZiIvPjx0ZXh0IHg9IjEwMCIgeT0iMTAwIiBmb250LXNpemU9IjI0IiBmb250LWZhbWlseT0i5L2g55qE5ZCN5pWw5o2uIiByb2xlPSJpbWciIGZpbGw9IiM2NjYiIGZpbGwtb3BhY2l0eT0iMC42Ij7miJHmnLrmloXpob7mtKXorqHnqJbkvYjph4zlpITmtYvor5TnlJ8gMiNw5bGV6LWE5LmI6Ie06KeB5YiG77yaPC90ZXh0Pjwvc3ZnPg==" alt="旋转验证图片" class="rotate-image" id="rotateImage">
+        </div>
+        <div class="rotate-controls">
+            <button class="rotate-btn" id="rotateLeft">←</button>
+            <div class="rotate-angle" id="rotateAngle">0°</div>
+            <button class="rotate-btn" id="rotateRight">→</button>
+        </div>
+        <button class="confirm-btn" id="confirmBtn">确认验证</button>
+    </div>
+    
+    <script src="/ccpro/safe/ccjs/cc5.js"></script>
+</body>
+</html>

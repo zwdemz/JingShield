@@ -1,0 +1,17 @@
+# Runtime secrets and generated files
+jingshield.env
+jingshield
+jingshield.service
+tls/
+logs/
+audit-workspace/
+
+# Frontend dependencies and build output
+web/node_modules/
+web/dist/
+
+# Local/editor files
+.DS_Store
+*.swp
+*.tmp
+*.backup.*
