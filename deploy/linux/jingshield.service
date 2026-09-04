@@ -1,0 +1,28 @@
+[Unit]
+Description=JieYun JingShield WAF
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jingshield
+Group=jingshield
+WorkingDirectory=@INSTALL_ROOT@
+EnvironmentFile=@INSTALL_ROOT@/jingshield.env
+ExecStart=@INSTALL_ROOT@/jingshield -c @INSTALL_ROOT@/config.yaml
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillSignal=SIGTERM
+UMask=0027
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@INSTALL_ROOT@/logs @INSTALL_ROOT@/data
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
