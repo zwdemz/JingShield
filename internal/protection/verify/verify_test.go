@@ -1,14 +1,60 @@
 package verify
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"jingshield/internal/config"
 )
+
+type sharedChallengeMemory struct {
+	mu     sync.Mutex
+	values map[string][]byte
+}
+
+func (s *sharedChallengeMemory) PutChallenge(_ context.Context, nonce string, payload []byte, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.values[nonce] = payload
+	return nil
+}
+
+func (s *sharedChallengeMemory) ConsumeChallenge(_ context.Context, nonce string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value := s.values[nonce]
+	delete(s.values, nonce)
+	return value, nil
+}
+
+func TestSharedChallengeIsSingleUseAcrossInstances(t *testing.T) {
+	shared := &sharedChallengeMemory{values: make(map[string][]byte)}
+	first := &Service{session: config.SessionConfig{Secret: "same-secret"}, shared: shared}
+	second := &Service{session: config.SessionConfig{Secret: "same-secret"}, shared: shared}
+	claims := challengeClaims{IP: "198.51.100.20", Action: "verify_slide", Nonce: "one-time", Difficulty: 8, IssuedAt: time.Now().Unix() - 2, ExpiresAt: time.Now().Unix() + 120}
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shared.PutChallenge(context.Background(), claims.Nonce, payload, 2*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	token := encoded + "." + first.sign(encoded)
+	proof := solveProof(token, claims.Difficulty)
+	if err := second.validateChallenge(claims.IP, claims.Action, token, proof); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.validateChallenge(claims.IP, claims.Action, token, proof); err == nil {
+		t.Fatal("challenge replay was accepted")
+	}
+}
 
 func TestChallengeIsIPBoundAndSingleUse(t *testing.T) {
 	s := &Service{

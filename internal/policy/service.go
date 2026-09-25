@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"jingshield/internal/config"
@@ -77,10 +78,12 @@ type Service struct {
 	repo        *repository.PolicyRepo
 	dynamic     *config.DynamicConfig
 	mu          sync.RWMutex
+	refreshMu   sync.Mutex
 	rules       []compiledRule
 	loaded      time.Time
 	updateMu    sync.Mutex
 	lastAttempt time.Time
+	matched     atomic.Uint64
 }
 
 func New(repo *repository.PolicyRepo, dynamic *config.DynamicConfig) *Service {
@@ -196,17 +199,24 @@ func decodeStrictJSON(data []byte, dst any) error {
 	return nil
 }
 
-func (s *Service) Invalidate() { s.mu.Lock(); s.loaded = time.Time{}; s.mu.Unlock() }
+func (s *Service) Invalidate() {
+	s.refreshMu.Lock()
+	s.mu.Lock()
+	s.loaded = time.Time{}
+	s.mu.Unlock()
+	s.refreshMu.Unlock()
+}
 
 func (s *Service) Match(ctx context.Context, rc *reqctx.RequestContext) *Match {
 	if err := s.ensureRules(ctx); err != nil {
 		return nil
 	}
 	s.mu.RLock()
-	rules := append([]compiledRule(nil), s.rules...)
+	rules := s.rules // snapshots are immutable after publication
 	s.mu.RUnlock()
 	for _, item := range rules {
 		if item.re.MatchString(targetValue(item.rule.Target, rc)) {
+			s.matched.Add(1)
 			detail := fmt.Sprintf("命中策略 %s（#%d）", item.rule.Name, item.rule.ID)
 			if item.rule.Category != "" {
 				detail += "，类别: " + item.rule.Category
@@ -223,11 +233,17 @@ func (s *Service) Match(ctx context.Context, rc *reqctx.RequestContext) *Match {
 	return nil
 }
 
+// MatchedTotal returns the number of requests matching a custom policy.
+func (s *Service) MatchedTotal() uint64 { return s.matched.Load() }
+
 func (s *Service) ensureRules(ctx context.Context) error {
-	s.mu.RLock()
-	fresh := !s.loaded.IsZero() && time.Since(s.loaded) < 5*time.Second
-	s.mu.RUnlock()
-	if fresh {
+	if s.rulesFresh() {
+		return nil
+	}
+	// Only one request queries and compiles a stale ruleset; the others reuse it.
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	if s.rulesFresh() {
 		return nil
 	}
 	list, err := s.repo.ListEnabled(ctx)
@@ -245,6 +261,13 @@ func (s *Service) ensureRules(ctx context.Context) error {
 	s.rules, s.loaded = compiled, time.Now()
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *Service) rulesFresh() bool {
+	s.mu.RLock()
+	fresh := !s.loaded.IsZero() && time.Since(s.loaded) < 5*time.Second
+	s.mu.RUnlock()
+	return fresh
 }
 
 func targetValue(target string, rc *reqctx.RequestContext) string {

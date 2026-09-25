@@ -115,7 +115,7 @@ jingshield/
 │   ├── repository/                 # MySQL persistence + idempotent migration (13 tables)
 │   ├── model/                      # Entity models + attack type / severity constants
 │   ├── iplib/                      # QQWry IP geolocation (optional)
-│   ├── store/memory/               # In-process memory state (Redis interface reserved)
+│   ├── store/                      # In-process or optional Redis shared state
 │   └── pkg/                        # Utilities: iputil / logx / errx
 ├── web/                            # Vue 3 frontend (embedded into binary via embed.FS)
 ├── configs/config.yaml             # Static configuration
@@ -273,7 +273,15 @@ Use `--action upgrade` for upgrades. The upgrade path verifies the package, obta
 - TLS termination uses one static certificate; per-site SNI and ACME automation are not yet implemented.
 - Built-in SQL injection and XSS detection is signature-oriented (RE2 patterns); semantic detection is under active development.
 - Administrators share one system-level role; fine-grained RBAC, MFA, and OIDC are not yet included.
-- Rate-limit and verification state is process-local; a Redis shared-state interface is reserved for multi-node deployments.
+- Single-node deployments use in-process state. Set `JINGSHIELD_REDIS_URL` to share CC counters and one-time challenges across replicas (Redis 6.2+); admin sessions remain process-local and need sticky routing.
+
+## Performance Controls
+
+- Production uses `environment: prod`, a stable `JINGSHIELD_SESSION_KEY` of at least 32 bytes, and `session.secure: true`.
+- Request bodies are limited to `server.max_body_bytes` (at most 32 MiB), and at most eight body inspections run concurrently. JSON inspection allows up to 8192 tokens and 64 KiB per string; larger structures receive HTTP 413.
+- Optional `server.method_policies` restrict methods for explicit host/path pairs; REST and CORS methods are unrestricted by default.
+- Authenticated `GET /api/v1/system/waf-metrics` exposes decision, challenge, policy match, queue depth, and audit loss counters. Audit records are queued in bounded memory and access records are inserted in batches.
+- Build the container with `docker build -t jingshield:local .`. The image includes `deploy/docker/config.yaml`; supply `JINGSHIELD_DB_PASS` and `JINGSHIELD_SESSION_KEY`, then set `JINGSHIELD_DB_HOST` and `JINGSHIELD_UPSTREAM` for your network. On Linux, the default host target needs `--add-host=host.docker.internal:host-gateway`. Put the admin endpoint behind HTTPS and narrow `admin_ips` to the deployment network.
 
 ---
 

@@ -35,6 +35,7 @@ type Dependencies struct {
 	Policies        *policy.Service
 	AdminHandler    http.Handler
 	FallbackHandler http.Handler
+	WAFMetrics      func() map[string]any
 }
 
 type API struct {
@@ -57,6 +58,7 @@ type API struct {
 	logDir       string
 	policies     *policy.Service
 	deviceEvents *repository.DeviceEventRepo
+	wafMetrics   func() map[string]any
 }
 
 type sessionContextKey struct{}
@@ -74,6 +76,7 @@ func New(deps Dependencies) (http.Handler, error) {
 		adminIPs: deps.StaticConfig.AdminIPs, trusted: deps.StaticConfig.Server.TrustedProxies,
 		fallback: deps.FallbackHandler, logDir: deps.StaticConfig.Log.Dir, policies: deps.Policies,
 		deviceEvents: repository.NewDeviceEventRepo(deps.DB),
+		wafMetrics:   deps.WAFMetrics,
 	}
 
 	mux := http.NewServeMux()
@@ -95,6 +98,7 @@ func New(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/system/status", a.protected(http.HandlerFunc(a.systemStatusGet), false, false))
 	mux.Handle("PUT /api/v1/system/status", a.protected(http.HandlerFunc(a.systemStatusPut), false, true))
 	mux.Handle("GET /api/v1/system/resources", a.protected(http.HandlerFunc(a.systemResourcesGet), false, false))
+	mux.Handle("GET /api/v1/system/waf-metrics", a.protected(http.HandlerFunc(a.wafMetricsGet), false, false))
 	mux.Handle("PUT /api/v1/system/alert-thresholds", a.protected(http.HandlerFunc(a.alertThresholdsPut), false, true))
 	mux.Handle("DELETE /api/v1/cache", a.protected(http.HandlerFunc(a.cacheDelete), false, true))
 	mux.Handle("PUT /api/v1/users/password", a.protected(http.HandlerFunc(a.passwordPut), true, true))
@@ -144,6 +148,14 @@ func New(deps Dependencies) (http.Handler, error) {
 	}
 	mux.Handle("/", a.fallback)
 	return a.recoverer(mux), nil
+}
+
+func (a *API) wafMetricsGet(w http.ResponseWriter, _ *http.Request) {
+	if a.wafMetrics == nil {
+		writeError(w, http.StatusServiceUnavailable, -1, "防护指标不可用")
+		return
+	}
+	writeOK(w, "success", a.wafMetrics())
 }
 
 func (a *API) recoverer(next http.Handler) http.Handler {

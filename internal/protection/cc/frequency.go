@@ -14,11 +14,11 @@ import (
 
 // 频率/间隔/端口检测参数
 const (
-	urlFreqWindow          = 60   // URL 频率检测窗口（秒）
-	urlFreqThreshold       = 20   // 单 URL 窗口内最大访问次数
-	reqIntervalThresholdMs = 500  // 最小请求间隔（毫秒），低于此值疑似高频攻击
-	portScanWindow         = 60   // 端口扫描检测窗口（秒）
-	portScanThreshold      = 5    // 窗口内不同端口数阈值
+	urlFreqWindow          = 60  // URL 频率检测窗口（秒）
+	urlFreqThreshold       = 20  // 单 URL 窗口内最大访问次数
+	reqIntervalThresholdMs = 500 // 最小请求间隔（毫秒），低于此值疑似高频攻击
+	portScanWindow         = 60  // 端口扫描检测窗口（秒）
+	portScanThreshold      = 5   // 窗口内不同端口数阈值
 )
 
 // checkURLFrequency 检测单 URL 访问频率
@@ -35,6 +35,12 @@ func (d *CCDetector) checkURLFrequency(ctx context.Context, rc *reqctx.RequestCo
 // 对应 PHP checkRequestInterval()
 // 取上次请求时刻，计算间隔，小于动态阈值则判定为高频
 func (d *CCDetector) checkRequestInterval(ctx context.Context, rc *reqctx.RequestContext) bool {
+	// A page legitimately issues parallel scripts, API calls and WebSockets.
+	// Timing-based browser challenges apply only to document navigation; volume
+	// limits still cover the other requests, including clients without this header.
+	if rc.Header.Get("Sec-Fetch-Mode") != "navigate" {
+		return false
+	}
 	last, err := d.store.LastRequestAt(ctx, rc.IP)
 	if err != nil || last.IsZero() {
 		// 首次请求不判定

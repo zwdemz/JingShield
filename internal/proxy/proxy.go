@@ -43,6 +43,7 @@ type Proxy struct {
 	upstream  string
 	timeout   int
 	serverCfg config.ServerConfig
+	bodySlots chan struct{}
 }
 
 const (
@@ -108,6 +109,7 @@ func New(engine *protection.Engine, verifySvc *verify.Service,
 		upstream:  upstreamCfg.Target,
 		timeout:   upstreamCfg.Timeout,
 		serverCfg: serverCfg,
+		bodySlots: make(chan struct{}, 8),
 	}, nil
 }
 
@@ -196,11 +198,30 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 请求体大小限制（防大包攻击）
+	if r.ContentLength > p.serverCfg.MaxBodyBytes {
+		writeError(w, p.dynCfg, errx.CodeParamInvalid, "请求体过大", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if r.Body != nil && r.Body != http.NoBody {
+		select {
+		case p.bodySlots <- struct{}{}:
+			defer func() { <-p.bodySlots }()
+		case <-r.Context().Done():
+			return
+		case <-time.After(2 * time.Second):
+			writeError(w, p.dynCfg, errx.CodeInternal, "请求处理繁忙", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, p.serverCfg.MaxBodyBytes)
 
 	// 构建请求上下文
 	rc, err := reqctx.NewRequestContext(r, p.serverCfg.TrustedProxies)
 	if err != nil {
+		if errors.Is(err, reqctx.ErrInspectionLimit) {
+			writeError(w, p.dynCfg, errx.CodeParamInvalid, "结构化请求体过于复杂", http.StatusRequestEntityTooLarge)
+			return
+		}
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
 			writeError(w, p.dynCfg, errx.CodeParamInvalid, "请求体过大", http.StatusRequestEntityTooLarge)

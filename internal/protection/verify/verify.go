@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"jingshield/internal/config"
@@ -68,10 +69,23 @@ type Service struct {
 	session    config.SessionConfig
 	mu         sync.Mutex
 	challenges map[string]challengeClaims
+	shared     ChallengeStore
+	succeeded  atomic.Uint64
+	failed     atomic.Uint64
+}
+
+// ChallengeStore shares one-time challenges between WAF replicas.
+type ChallengeStore interface {
+	PutChallenge(context.Context, string, []byte, time.Duration) error
+	ConsumeChallenge(context.Context, string) ([]byte, error)
 }
 
 // New 构造验证服务
-func New(vf *repository.VerifyFailRepo, ip *repository.IPListRepo, st store.StateStore, dynCfg *config.DynamicConfig, session config.SessionConfig) *Service {
+func New(vf *repository.VerifyFailRepo, ip *repository.IPListRepo, st store.StateStore, dynCfg *config.DynamicConfig, session config.SessionConfig, shared ...ChallengeStore) *Service {
+	var challengeStore ChallengeStore
+	if len(shared) > 0 {
+		challengeStore = shared[0]
+	}
 	return &Service{
 		verifyFail: vf,
 		ipList:     ip,
@@ -79,6 +93,7 @@ func New(vf *repository.VerifyFailRepo, ip *repository.IPListRepo, st store.Stat
 		dynCfg:     dynCfg,
 		session:    session,
 		challenges: make(map[string]challengeClaims),
+		shared:     challengeStore,
 	}
 }
 
@@ -165,6 +180,14 @@ func (s *Service) NewChallenge(ip string, mode Mode) (token, action string, wait
 	}
 	encoded := base64.RawURLEncoding.EncodeToString(payload)
 	token = encoded + "." + s.sign(encoded)
+	if s.shared != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.shared.PutChallenge(ctx, claims.Nonce, payload, 2*time.Minute); err != nil {
+			return "", "", 0, 0, fmt.Errorf("保存验证挑战失败: %w", err)
+		}
+		return token, action, waitSeconds, difficulty, nil
+	}
 
 	s.mu.Lock()
 	for nonce, existing := range s.challenges {
@@ -191,10 +214,22 @@ func (s *Service) NewChallenge(ip string, mode Mode) (token, action string, wait
 // action 取值：verify_5second/verify_slide/verify_click/verify_302/verify_jsredirect/verify_rotate/verify_securitycheck/verify_human
 func (s *Service) HandleVerify(ctx context.Context, rc *reqctx.RequestContext, action, token, proof string) (bool, error) {
 	if err := s.validateChallenge(rc.IP, action, token, proof); err != nil {
+		s.failed.Add(1)
 		s.recordFailure(ctx, rc.IP)
 		return false, err
 	}
-	return s.verificationSuccess(ctx, rc)
+	ok, err := s.verificationSuccess(ctx, rc)
+	if err != nil {
+		s.failed.Add(1)
+		return false, err
+	}
+	s.succeeded.Add(1)
+	return ok, nil
+}
+
+// Metrics returns aggregate challenge outcomes for the admin dashboard.
+func (s *Service) Metrics() map[string]any {
+	return map[string]any{"challenge_succeeded_total": s.succeeded.Load(), "challenge_failed_total": s.failed.Load()}
 }
 
 func (s *Service) validateChallenge(ip, action, token, proof string) error {
@@ -223,6 +258,18 @@ func (s *Service) validateChallenge(ip, action, token, proof string) error {
 	}
 	if !validProof(token, proof, claims.Difficulty) {
 		return errors.New("验证工作量证明无效")
+	}
+	if s.shared != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		stored, err := s.shared.ConsumeChallenge(ctx, claims.Nonce)
+		if err != nil {
+			return fmt.Errorf("读取验证挑战失败: %w", err)
+		}
+		if !hmac.Equal(stored, payload) {
+			return errors.New("验证令牌已使用或不存在")
+		}
+		return nil
 	}
 
 	s.mu.Lock()

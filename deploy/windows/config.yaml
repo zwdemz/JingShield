@@ -1,3 +1,5 @@
+environment: prod
+
 server:
   listen: "0.0.0.0:18080"
   admin_listen: "0.0.0.0:18080"

@@ -244,8 +244,8 @@ func TestSSRFChecksResolvedHostname(t *testing.T) {
 	result := DetectSSRFWithResolver(context.Background(), "https://cdn.example.test/assets", func(context.Context, string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("169.254.169.254"), net.ParseIP("203.0.113.10")}, nil
 	})
-	if !result.Detected || result.Risk != SSRFRiskHigh {
-		t.Fatalf("resolved private address was not detected: %#v", result)
+	if !result.Detected || result.Risk != SSRFRiskCritical {
+		t.Fatalf("resolved cloud metadata address was not classified as critical: %#v", result)
 	}
 }
 

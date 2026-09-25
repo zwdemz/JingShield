@@ -34,6 +34,32 @@ func (r *AccessLogRepo) Insert(ctx context.Context, log *model.AccessLog) error 
 	return nil
 }
 
+// InsertBatch writes access records in one transaction, preserving each record's fields.
+func (r *AccessLogRepo) InsertBatch(ctx context.Context, logs []*model.AccessLog) error {
+	if len(logs) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("开始访问日志批量写入失败: %w", err)
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO jyj_access_log (ip, host, uri, method, user_agent, referer, status, response_time, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`)
+	if err != nil {
+		return fmt.Errorf("准备访问日志批量写入失败: %w", err)
+	}
+	defer stmt.Close()
+	for _, log := range logs {
+		if _, err := stmt.ExecContext(ctx, log.IP, log.Host, log.URI, log.Method, log.UserAgent, log.Referer, log.Status, log.ResponseTime); err != nil {
+			return fmt.Errorf("访问日志批量写入失败: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交访问日志批量写入失败: %w", err)
+	}
+	return nil
+}
+
 // CountByIPSince 统计某 IP 在 since 之后（含）的访问次数
 // 对应 PHP checkTCPAttack() 的 SELECT COUNT(*) ... WHERE ip=? AND created_at>?
 func (r *AccessLogRepo) CountByIPSince(ctx context.Context, ip, since string) (int64, error) {

@@ -80,7 +80,8 @@ Supported secret-file/environment keys:
   JINGSHIELD_DB_ADMIN_PASS, JINGSHIELD_DB_PASS, JINGSHIELD_SESSION_KEY,
   JINGSHIELD_DB_HOST, JINGSHIELD_DB_PORT, JINGSHIELD_DB_USER,
   JINGSHIELD_DB_NAME, JINGSHIELD_UPSTREAM, JINGSHIELD_LISTEN,
-  JINGSHIELD_TLS_LISTEN, JINGSHIELD_TLS_CERT_FILE, JINGSHIELD_TLS_KEY_FILE
+  JINGSHIELD_TLS_LISTEN, JINGSHIELD_TLS_CERT_FILE, JINGSHIELD_TLS_KEY_FILE,
+  JINGSHIELD_REDIS_URL
 EOF
 }
 
@@ -106,6 +107,20 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+read_runtime_env() {
+  local line key value
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line}" || "${line}" == \#* ]] && continue
+    [[ "${line}" == *=* ]] || { echo "invalid runtime environment line" >&2; exit 1; }
+    key="${line%%=*}"
+    value="${line#*=}"
+    [[ "${key}" =~ ^JINGSHIELD_[A-Z0-9_]+$ ]] || { echo "invalid runtime environment key" >&2; exit 1; }
+    printf -v "${key}" '%s' "${value}"
+    export "${key}"
+  done < "$1"
+}
+
 run_installed() {
 	local binary="${JINGSHIELD_BINARY:-${install_root}/jingshield}"
 	if [[ -z "${JINGSHIELD_BINARY:-}" && ! -f "${binary}" && -f "${install_root}/bin/jingshield" ]]; then
@@ -121,10 +136,7 @@ run_installed() {
     [[ -f "${required}" ]] || { echo "missing required file: ${required}" >&2; exit 1; }
   done
 
-  set -a
-  # shellcheck disable=SC1090
-  source "${env_file}"
-  set +a
+  read_runtime_env "${env_file}"
 
   local cert_file="${JINGSHIELD_TLS_CERT_FILE:-${install_root}/tls/jingshield.crt}"
   local key_file="${JINGSHIELD_TLS_KEY_FILE:-${install_root}/tls/jingshield.key}"
@@ -208,7 +220,7 @@ allowed_key() {
     JINGSHIELD_DB_ADMIN_PASS|JINGSHIELD_DB_PASS|JINGSHIELD_SESSION_KEY|\
     JINGSHIELD_DB_HOST|JINGSHIELD_DB_PORT|JINGSHIELD_DB_USER|JINGSHIELD_DB_NAME|\
     JINGSHIELD_UPSTREAM|JINGSHIELD_LISTEN|JINGSHIELD_TLS_LISTEN|\
-    JINGSHIELD_TLS_CERT_FILE|JINGSHIELD_TLS_KEY_FILE) return 0 ;;
+    JINGSHIELD_TLS_CERT_FILE|JINGSHIELD_TLS_KEY_FILE|JINGSHIELD_REDIS_URL) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -436,6 +448,10 @@ env_tmp="${install_root}/.jingshield.env.${timestamp}"
   printf 'JINGSHIELD_DB_NAME=%s\n' "${db_name}"
   printf 'JINGSHIELD_DB_PASS=%s\n' "${db_password}"
   printf 'JINGSHIELD_SESSION_KEY=%s\n' "${session_key}"
+  if [[ -n "${JINGSHIELD_REDIS_URL:-}" ]]; then
+    [[ "${JINGSHIELD_REDIS_URL}" != *[[:space:]]* ]] || { echo "JINGSHIELD_REDIS_URL must not contain whitespace" >&2; exit 1; }
+    printf 'JINGSHIELD_REDIS_URL=%s\n' "${JINGSHIELD_REDIS_URL}"
+  fi
   for key in JINGSHIELD_UPSTREAM JINGSHIELD_LISTEN JINGSHIELD_TLS_LISTEN JINGSHIELD_TLS_CERT_FILE JINGSHIELD_TLS_KEY_FILE; do
     if [[ -n "${!key:-}" ]]; then
       [[ "${!key}" != *[[:space:]]* ]] || { echo "${key} must not contain whitespace" >&2; exit 1; }
@@ -449,10 +465,7 @@ fi
 chmod 0640 "${env_tmp}"
 mv -f -- "${env_tmp}" "${env_file}"
 
-set -a
-# shellcheck disable=SC1090
-source "${env_file}"
-set +a
+load_values "${env_file}" 1
 if ! "${install_root}/jingshield" migrate -c "${config_file}"; then
   if [[ -t 0 ]]; then
     read -r -s -p "YAML 中的 MySQL 密码无效，请重新输入（${db_user}@${db_host}）: " db_password

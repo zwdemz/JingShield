@@ -57,16 +57,25 @@ func TestReverseForSelectsSiteAndAppliesHostPolicy(t *testing.T) {
 }
 
 func TestReverseForAllowsExplicitSelfSignedTLSOrigin(t *testing.T) {
-	site := &model.Site{Upstream: "https://127.0.0.1:8080", TLSSkipVerify: true}
-	p := &Proxy{sites: fixedSiteResolver{site: site, hasSites: true}, reverses: map[string]*httputil.ReverseProxy{}}
-	req := &http.Request{Host: "cyberstrike.example", URL: &url.URL{Path: "/"}, Header: make(http.Header)}
-	rp, err := p.reverseFor(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	transport, ok := rp.Transport.(*http.Transport)
-	if !ok || transport.TLSClientConfig == nil || !transport.TLSClientConfig.InsecureSkipVerify {
-		t.Fatal("explicit self-signed TLS option was not applied")
+	for _, skipVerify := range []bool{false, true} {
+		site := &model.Site{Upstream: "https://127.0.0.1:8080", TLSSkipVerify: skipVerify}
+		p := &Proxy{sites: fixedSiteResolver{site: site, hasSites: true}, reverses: map[string]*httputil.ReverseProxy{}}
+		req := &http.Request{Host: "cyberstrike.example", URL: &url.URL{Path: "/"}, Header: make(http.Header)}
+		rp, err := p.reverseFor(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		breaker, ok := rp.Transport.(*circuitBreakerTransport)
+		if !ok {
+			t.Fatalf("expected circuit breaker, got %T", rp.Transport)
+		}
+		transport, ok := breaker.base.(*http.Transport)
+		if !ok || transport.TLSClientConfig == nil {
+			t.Fatalf("missing TLS configuration on circuit breaker transport: %T", breaker.base)
+		}
+		if transport.TLSClientConfig.InsecureSkipVerify != skipVerify || transport.TLSClientConfig.MinVersion != tls.VersionTLS12 {
+			t.Fatalf("skipVerify=%v: unexpected TLS configuration: %+v", skipVerify, transport.TLSClientConfig)
+		}
 	}
 }
 

@@ -1,10 +1,44 @@
 # Runtime secrets and generated files
 jingshield.env
-jingshield
+/jingshield
 jingshield.service
 tls/
 logs/
+*.log
+*.pid
+data/QQWry.Dat
+deploy/docker/data/
+deploy/docker/jingshield-linux-amd64
+deploy/docker/jingshield-linux-amd64-nas
+deploy/docker/ca-certificates.crt
+deploy/docker/*.local.yaml
+deploy/docker/NAS-ACCESS.md
+deploy/docker/check-nas-browser.cjs
 audit-workspace/
+qqwry.dat
+
+# Local credentials and machine-specific files
+.env
+.env.*
+!.env.example
+*.env
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.csr
+cookie*.txt
+deploy/windows/jingshield.env.ps1
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.gocache*/
+.gotmp*/
+coverage/
+*.coverprofile
 
 # Frontend dependencies and build output
 web/node_modules/

@@ -1,0 +1,19 @@
+title = "Gitleaks Config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Exclude virtual environments and dependencies"
+paths = [
+    '''\.venv/''',
+    '''venv/''',
+    '''env/''',
+    '''node_modules/''',
+    '''__pycache__/''',
+    '''\.git/''',
+    '''dist/''',
+    '''build/''',
+    '''\.idea/''',
+    '''\.vscode/''',
+]

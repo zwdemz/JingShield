@@ -52,10 +52,16 @@ flock -n 9 || { echo "another JingShield upgrade is running" >&2; exit 1; }
 
 install -o root -g root -m 0755 "${candidate}" "${next}"
 "${next}" help >/dev/null
-set -a
-# shellcheck disable=SC1090
-source "${env_file}"
-set +a
+while IFS= read -r line || [[ -n "${line}" ]]; do
+  line="${line%$'\r'}"
+  [[ -z "${line}" || "${line}" == \#* ]] && continue
+  [[ "${line}" == *=* ]] || { echo "invalid runtime environment line" >&2; exit 1; }
+  key="${line%%=*}"
+  value="${line#*=}"
+  [[ "${key}" =~ ^JINGSHIELD_[A-Z0-9_]+$ ]] || { echo "invalid runtime environment key" >&2; exit 1; }
+  printf -v "${key}" '%s' "${value}"
+  export "${key}"
+done < "${env_file}"
 "${next}" migrate -c "${config_file}"
 cp --preserve=mode,ownership,timestamps "${current}" "${backup}"
 

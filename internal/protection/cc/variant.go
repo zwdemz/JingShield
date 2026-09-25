@@ -2,8 +2,7 @@ package cc
 
 // 变异 CC 攻击检测
 // 对应 PHP CCProtection::checkVariantCCAttack()
-// 攻击者不断变换请求特征（随机参数、动态 URL、变化 UA）绕过特征检测，
-// 本检测从 UA、参数特征、URL 多样性多维度识别
+// 攻击者不断变换参数与 URL 绕过频率检测；保留明确的扫描器 UA 特征。
 
 import (
 	"context"
@@ -16,17 +15,15 @@ import (
 
 // 变异 CC 检测参数
 const (
-	variantCheckTime    = 10 // URL 多样性检测窗口（秒）
-	variantMaxUniqueURL = 10 // 窗口内最大不同 URL 数
+	variantCheckTime     = 10 // URL 多样性检测窗口（秒）
+	variantMaxUniqueURL  = 10 // 窗口内最大不同 URL 数
 	variantMaxParamCount = 30 // 最大参数数量
-	variantMinUALength  = 15 // UA 最小长度
 )
 
 // maliciousUAPatterns 恶意 User-Agent 特征
 // 对应 PHP $malicious_ua_patterns
 var maliciousUAPatterns = []string{
-	"python-requests", "curl", "wget", "bot", "spider",
-	"scanner", "attacker", "exploit", "hack", "sqlmap",
+	"sqlmap", "nikto", "nuclei",
 }
 
 // longParamPattern 超长参数名特征正则
@@ -41,12 +38,6 @@ func (d *CCDetector) checkVariant(ctx context.Context, rc *reqctx.RequestContext
 	}
 
 	// 1. User-Agent 异常检测
-	if rc.UserAgent == "" {
-		return true
-	}
-	if len(rc.UserAgent) < variantMinUALength {
-		return true
-	}
 	uaLower := strings.ToLower(rc.UserAgent)
 	for _, p := range maliciousUAPatterns {
 		if strings.Contains(uaLower, p) {
@@ -54,15 +45,20 @@ func (d *CCDetector) checkVariant(ctx context.Context, rc *reqctx.RequestContext
 		}
 	}
 
-	// 2. 参数特征检测
+	// Parameter shape alone is common in legitimate APIs. Require accompanying
+	// URL churn before blocking on it.
 	keys := rc.AllParamKeys()
-	if len(keys) > variantMaxParamCount {
-		return true
-	}
+	paramSuspicious := len(keys) > variantMaxParamCount
 	for _, key := range keys {
 		if len(key) > 20 || longParamPattern.MatchString(key) {
-			return true
+			paramSuspicious = true
 		}
+	}
+	// NAS dashboards load many distinct resources in a short burst. Diversity
+	// alone is not an attack signal; require suspicious parameters as well.
+	// Ordinary request-volume limits remain enforced by the main CC detector.
+	if !paramSuspicious {
+		return false
 	}
 
 	// 3. URL 多样性检测：窗口内不同 URL 数超阈值
