@@ -1,0 +1,56 @@
+name: jingshield-test
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env.test}
+      MYSQL_DATABASE: jyj_ccpro
+      MYSQL_USER: jingshield
+      MYSQL_PASSWORD: ${JINGSHIELD_DB_PASS:?Set JINGSHIELD_DB_PASS in .env.test}
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks:
+      - isolated
+
+  upstream:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    networks:
+      - isolated
+
+  waf:
+    image: jingshield:test-20260924-nas
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      upstream:
+        condition: service_started
+    environment:
+      JINGSHIELD_DB_HOST: db
+      JINGSHIELD_DB_USER: jingshield
+      JINGSHIELD_DB_NAME: jyj_ccpro
+      JINGSHIELD_DB_PASS: ${JINGSHIELD_DB_PASS:?Set JINGSHIELD_DB_PASS in .env.test}
+      JINGSHIELD_UPSTREAM: http://upstream:80
+      JINGSHIELD_SESSION_KEY: ${JINGSHIELD_SESSION_KEY:?Set JINGSHIELD_SESSION_KEY in .env.test}
+      JINGSHIELD_TLS_LISTEN: 0.0.0.0:18443
+      JINGSHIELD_TLS_CERT_FILE: /var/lib/jingshield/tls/lan.crt
+      JINGSHIELD_TLS_KEY_FILE: /var/lib/jingshield/tls/lan.key
+    ports:
+      - "${JINGSHIELD_BIND_IP:-192.168.1.92}:18081:18080"
+      - "${JINGSHIELD_BIND_IP:-192.168.1.92}:18443:18443"
+    volumes:
+      - ./data/waf:/var/lib/jingshield
+    networks:
+      - isolated
+
+networks:
+  isolated:
+    name: jingshield-test-isolated

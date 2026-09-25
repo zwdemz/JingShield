@@ -5,6 +5,7 @@ package detector
 
 import (
 	"context"
+	"net/url"
 	"strings"
 
 	"jingshield/internal/model"
@@ -46,7 +47,7 @@ func NewSSRFDetector() *SSRFDetector { return &SSRFDetector{} }
 func (d *SSRFDetector) Name() string { return "SSRF" }
 
 func (d *SSRFDetector) Check(_ context.Context, rc *reqctx.RequestContext) *Result {
-	inputs := collectSemanticInputs(rc)
+	inputs := collectSSRFInputs(rc)
 	for _, nv := range inputs {
 		if !looksLikeURL(nv.Normalized) {
 			continue
@@ -62,6 +63,35 @@ func (d *SSRFDetector) Check(_ context.Context, rc *reqctx.RequestContext) *Resu
 		}
 	}
 	return nil
+}
+
+// collectSSRFInputs excludes only the current site's Origin/Referer metadata:
+// a browser visiting a private NAS address is not asking the server to fetch it.
+// Referer query values and all actual request parameters remain inspected.
+// Invalid, credential-bearing or foreign origins retain the ordinary checks.
+func collectSSRFInputs(rc *reqctx.RequestContext) []normalize.Value {
+	copyContext := *rc
+	copyContext.Header = rc.Header.Clone()
+	copyContext.BodyValues = append([]string(nil), rc.BodyValues...)
+	scheme := "http"
+	if rc.R.TLS != nil {
+		scheme = "https"
+	}
+	for _, name := range []string{"Origin", "Referer"} {
+		values := copyContext.Header.Values(name)
+		copyContext.Header.Del(name)
+		for _, value := range values {
+			parsed, err := url.Parse(value)
+			if err != nil || parsed.User != nil || parsed.Scheme != scheme || !strings.EqualFold(parsed.Host, rc.R.Host) {
+				copyContext.Header.Add(name, value)
+				continue
+			}
+			for _, queryValues := range parsed.Query() {
+				copyContext.BodyValues = append(copyContext.BodyValues, queryValues...)
+			}
+		}
+	}
+	return collectSemanticInputs(&copyContext)
 }
 
 // XXEDetector XXE/XML 注入检测器

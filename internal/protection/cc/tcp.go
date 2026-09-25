@@ -13,8 +13,8 @@ import (
 
 // TCP 检测参数（对应 PHP 硬编码常量）
 const (
-	tcpCheckTime       = 5  // 检测窗口（秒）
-	tcpMaxConnections  = 20 // 基础最大连接阈值
+	tcpCheckTime      = 5  // 检测窗口（秒）
+	tcpMaxConnections = 20 // 基础最大连接阈值
 )
 
 // checkTCP 检测 TCP 连接攻击
@@ -25,7 +25,10 @@ func (d *CCDetector) checkTCP(ctx context.Context, rc *reqctx.RequestContext) bo
 	}
 
 	// 动态阈值
-	effectiveMax := GetDynamicThreshold(tcpMaxConnections)
+	// This query counts HTTP requests, not concurrent TCP connections. Modern
+	// NAS pages can load more than 20 resources at once, so use the configured
+	// request budget while retaining the shorter burst window.
+	effectiveMax := GetDynamicThreshold(max(tcpMaxConnections, d.dynCfg.GetIntDefault("cc_visit_count", 100)))
 
 	// 查询 access_log 在窗口内的访问次数
 	since := time.Now().Add(-tcpCheckTime * time.Second).Format("2006-01-02 15:04:05")

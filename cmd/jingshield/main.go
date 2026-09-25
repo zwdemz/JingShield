@@ -33,7 +33,9 @@ import (
 	"jingshield/internal/protection/verify"
 	"jingshield/internal/proxy"
 	"jingshield/internal/repository"
+	"jingshield/internal/store"
 	"jingshield/internal/store/memory"
+	redisstore "jingshield/internal/store/redis"
 	webui "jingshield/web"
 )
 
@@ -302,9 +304,21 @@ func run(configPath string) error {
 		defer qqwry.Close()
 	}
 
-	state := memory.New()
-	gcInterval := time.Duration(cfg.Data.StateGCInterval) * time.Second
-	state.StartGC(ctx, gcInterval, 10*time.Minute)
+	var state store.StateStore
+	var sharedChallenges verify.ChallengeStore
+	if redisURL := os.Getenv("JINGSHIELD_REDIS_URL"); redisURL != "" {
+		redisState, err := redisstore.New(ctx, redisURL)
+		if err != nil {
+			return err
+		}
+		defer redisState.Close()
+		state = redisState
+		sharedChallenges = redisState
+	} else {
+		memoryState := memory.New()
+		memoryState.StartGC(ctx, time.Duration(cfg.Data.StateGCInterval)*time.Second, 10*time.Minute)
+		state = memoryState
+	}
 	cc.StartCPUMonitor(ctx)
 
 	accessRepo := repository.NewAccessLogRepo(db)
@@ -316,9 +330,10 @@ func run(configPath string) error {
 	policySvc := policy.New(policyRepo, dynCfg)
 	policySvc.StartAutoUpdate(ctx)
 	ipListSvc := iplist.New(ipListRepo, locator, dynCfg)
-	verifySvc := verify.New(verifyFailRepo, ipListRepo, state, dynCfg, cfg.Session)
-	ccDetector := cc.NewCCDetector(state, accessRepo, verifyFailRepo, ipListRepo, locator, dynCfg, cfg.Session)
+	verifySvc := verify.New(verifyFailRepo, ipListRepo, state, dynCfg, cfg.Session, sharedChallenges)
+	ccDetector := cc.NewCCDetector(state, accessRepo, verifyFailRepo, ipListRepo, locator, dynCfg, cfg.Session, cfg.Server.MethodPolicies...)
 	engine := protection.NewEngine(dynCfg, ipListSvc, ccDetector, verifySvc, accessRepo, attackRepo, locator, policySvc)
+	defer engine.CloseLogging()
 	proxyHandler, err := proxy.New(engine, verifySvc, dynCfg, siteRepo, cfg.Upstream, cfg.Server)
 	if err != nil {
 		return err
@@ -326,6 +341,14 @@ func run(configPath string) error {
 	handler, err := api.New(api.Dependencies{
 		DB: db, DynamicConfig: dynCfg, State: state, StaticConfig: cfg, Sites: siteRepo,
 		Policies: policySvc, AdminHandler: webui.Handler(), FallbackHandler: proxyHandler,
+		WAFMetrics: func() map[string]any {
+			metrics := engine.Metrics()
+			for key, value := range verifySvc.Metrics() {
+				metrics[key] = value
+			}
+			metrics["policy_matched_total"] = policySvc.MatchedTotal()
+			return metrics
+		},
 	})
 	if err != nil {
 		return err

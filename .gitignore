@@ -18,6 +18,14 @@ logs/
 *.log
 *.pid
 data/QQWry.Dat
+deploy/docker/data/
+deploy/docker/jingshield-linux-amd64
+deploy/docker/jingshield-linux-amd64-nas
+deploy/docker/ca-certificates.crt
+deploy/docker/*.local.yaml
+deploy/docker/NAS-ACCESS.md
+deploy/docker/check-nas-browser.cjs
+audit-workspace/
 qqwry.dat
 
 # Private project documentation

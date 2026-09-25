@@ -5,29 +5,38 @@ package config
 
 // Config 根配置
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Upstream UpstreamConfig `yaml:"upstream"`
-	Database DatabaseConfig `yaml:"database"`
-	AdminIPs []string       `yaml:"admin_ips"`
-	Log      LogConfig      `yaml:"log"`
-	Data     DataConfig     `yaml:"data"`
-	Session  SessionConfig  `yaml:"session"`
+	Environment string         `yaml:"environment"`
+	Server      ServerConfig   `yaml:"server"`
+	Upstream    UpstreamConfig `yaml:"upstream"`
+	Database    DatabaseConfig `yaml:"database"`
+	AdminIPs    []string       `yaml:"admin_ips"`
+	Log         LogConfig      `yaml:"log"`
+	Data        DataConfig     `yaml:"data"`
+	Session     SessionConfig  `yaml:"session"`
 }
 
 // ServerConfig 服务监听配置
 type ServerConfig struct {
-	Listen       string `yaml:"listen"`
-	AdminListen  string `yaml:"admin_listen"`
-	TLSListen    string `yaml:"tls_listen"`
-	TLSCertFile  string `yaml:"tls_cert_file"`
-	TLSKeyFile   string `yaml:"tls_key_file"`
-	ReadTimeout  int    `yaml:"read_timeout"`
-	WriteTimeout int    `yaml:"write_timeout"`
-	MaxBodyBytes int64  `yaml:"max_body_bytes"`
+	Listen         string         `yaml:"listen"`
+	AdminListen    string         `yaml:"admin_listen"`
+	TLSListen      string         `yaml:"tls_listen"`
+	TLSCertFile    string         `yaml:"tls_cert_file"`
+	TLSKeyFile     string         `yaml:"tls_key_file"`
+	ReadTimeout    int            `yaml:"read_timeout"`
+	WriteTimeout   int            `yaml:"write_timeout"`
+	MaxBodyBytes   int64          `yaml:"max_body_bytes"`
+	MethodPolicies []MethodPolicy `yaml:"method_policies"`
 	// TrustedProxies lists reverse proxies/CDNs whose forwarding headers may be trusted.
 	// Entries may be individual IP addresses or CIDR ranges. When empty, forwarding
 	// headers are ignored and RemoteAddr is always used as the client address.
 	TrustedProxies []string `yaml:"trusted_proxies"`
+}
+
+// MethodPolicy restricts methods only on an explicitly selected host and path prefix.
+type MethodPolicy struct {
+	Host           string   `yaml:"host"`
+	PathPrefix     string   `yaml:"path_prefix"`
+	AllowedMethods []string `yaml:"allowed_methods"`
 }
 
 // UpstreamConfig 反向代理目标配置

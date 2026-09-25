@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -22,6 +23,9 @@ import (
 
 	"jingshield/internal/pkg/iputil"
 )
+
+// ErrInspectionLimit means a structured body exceeds the bounded inspection budget.
+var ErrInspectionLimit = errors.New("结构化请求体超出检测预算")
 
 // RequestContext 请求防护上下文
 type RequestContext struct {
@@ -93,7 +97,11 @@ func NewRequestContext(r *http.Request, trustedProxies []string) (*RequestContex
 			rc.Post, rc.BodyValues = readMultipartValues(body, boundary)
 		}
 	case "application/json":
-		rc.BodyValues = jsonValues(body)
+		values, parseErr := jsonValues(body)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		rc.BodyValues = values
 		// 同时保留原文，可检测跨字段拼接前的特征。
 		rc.BodyValues = append(rc.BodyValues, string(body))
 	default:
@@ -196,30 +204,28 @@ func uploadTypeMismatch(filename, declared, detected string) bool {
 	return strings.SplitN(declared, "/", 2)[0] != strings.SplitN(detected, "/", 2)[0]
 }
 
-func jsonValues(body []byte) []string {
-	var value any
-	if err := json.Unmarshal(body, &value); err != nil {
-		return nil
-	}
-	var out []string
-	var walk func(any)
-	walk = func(v any) {
-		switch x := v.(type) {
-		case map[string]any:
-			for key, child := range x {
-				out = append(out, key)
-				walk(child)
+func jsonValues(body []byte) ([]string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	values := make([]string, 0, 16)
+	for tokenCount := 0; ; tokenCount++ {
+		if tokenCount >= 8192 {
+			return nil, ErrInspectionLimit
+		}
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return values, nil
+		}
+		if err != nil {
+			// Keep malformed JSON available to raw-body rules and the origin.
+			return nil, nil
+		}
+		if value, ok := token.(string); ok {
+			if len(value) > 65536 {
+				return nil, ErrInspectionLimit
 			}
-		case []any:
-			for _, child := range x {
-				walk(child)
-			}
-		case string:
-			out = append(out, x)
+			values = append(values, value)
 		}
 	}
-	walk(value)
-	return out
 }
 
 // AllParamValues 收集全部请求参数值（GET + POST + Cookie）

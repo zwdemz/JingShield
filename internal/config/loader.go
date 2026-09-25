@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -51,6 +52,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("JINGSHIELD_DB_PASS"); v != "" {
 		cfg.Database.Pass = v
 	}
+	if v := os.Getenv("JINGSHIELD_ENV"); v != "" {
+		cfg.Environment = v
+	}
 	if v := os.Getenv("JINGSHIELD_DB_HOST"); v != "" {
 		cfg.Database.Host = v
 	}
@@ -87,6 +91,12 @@ func applyEnvOverrides(cfg *Config) {
 
 // validate 配置参数边界校验与默认值兜底
 func (c *Config) validate() error {
+	if c.Environment == "" {
+		c.Environment = "dev"
+	}
+	if c.Environment != "dev" && c.Environment != "test" && c.Environment != "prod" {
+		return fmt.Errorf("environment 只能为 dev、test 或 prod")
+	}
 	if c.Server.Listen == "" {
 		c.Server.Listen = "127.0.0.1:18080"
 	}
@@ -109,6 +119,23 @@ func (c *Config) validate() error {
 	}
 	if c.Server.MaxBodyBytes <= 0 {
 		c.Server.MaxBodyBytes = 10 * 1024 * 1024
+	}
+	if c.Server.MaxBodyBytes > 32*1024*1024 {
+		return fmt.Errorf("server.max_body_bytes 不能超过 32 MiB")
+	}
+	for index := range c.Server.MethodPolicies {
+		policy := &c.Server.MethodPolicies[index]
+		policy.Host = strings.ToLower(strings.TrimSpace(policy.Host))
+		if policy.Host == "" || strings.ContainsAny(policy.Host, "/\\ ") || !strings.HasPrefix(policy.PathPrefix, "/") || len(policy.AllowedMethods) == 0 {
+			return fmt.Errorf("server.method_policies[%d] 的 host、path_prefix 或 allowed_methods 无效", index)
+		}
+		for methodIndex, method := range policy.AllowedMethods {
+			method = strings.ToUpper(strings.TrimSpace(method))
+			if method == "" || strings.ContainsAny(method, " \t\r\n") {
+				return fmt.Errorf("server.method_policies[%d] 包含无效方法", index)
+			}
+			policy.AllowedMethods[methodIndex] = method
+		}
 	}
 	if c.Upstream.Target == "" {
 		return fmt.Errorf("upstream.target 不能为空，请配置被保护站点地址")
@@ -154,6 +181,14 @@ func (c *Config) validate() error {
 	}
 	if c.Session.Name == "" {
 		c.Session.Name = "jingshield_session"
+	}
+	if c.Environment == "prod" {
+		if len(c.Session.Secret) < 32 || c.Session.Secret == "change-me-to-a-random-32-byte-secret-key" {
+			return fmt.Errorf("生产环境必须配置至少 32 字节的 JINGSHIELD_SESSION_KEY")
+		}
+		if !c.Session.Secure {
+			return fmt.Errorf("生产环境必须启用 session.secure")
+		}
 	}
 	if c.Session.Secret == "" || c.Session.Secret == "change-me-to-a-random-32-byte-secret-key" {
 		// 兜底随机密钥（仅本次进程有效），生产应显式配置

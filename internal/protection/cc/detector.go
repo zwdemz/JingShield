@@ -8,6 +8,8 @@ package cc
 
 import (
 	"context"
+	"net"
+	"strings"
 
 	"jingshield/internal/config"
 	"jingshield/internal/iplib"
@@ -34,51 +36,65 @@ type Result struct {
 }
 
 // allow / block / verify 快捷构造
-func allow() *Result  { return &Result{Action: ActionAllow} }
+func allow() *Result             { return &Result{Action: ActionAllow} }
 func block(at, d string) *Result { return &Result{Action: ActionBlock, AttackType: at, Detail: d} }
-func verify() *Result { return &Result{Action: ActionVerify} }
-
-// forbiddenMethods 禁止的 HTTP 方法
-// 对应 PHP CCProtection::$forbidden_methods
-var forbiddenMethods = []string{"OPTIONS", "TRACE", "PUT", "DELETE", "CONNECT", "PATCH"}
+func verify() *Result            { return &Result{Action: ActionVerify} }
 
 // CCDetector CC 攻击检测器
 type CCDetector struct {
-	store        store.StateStore
-	accessLog    *repository.AccessLogRepo
-	verifyFail   *repository.VerifyFailRepo
-	ipList       *repository.IPListRepo
-	locator      iplib.Locator
-	dynCfg       *config.DynamicConfig
-	session      config.SessionConfig
-	verifyMaxAge int
+	store          store.StateStore
+	accessLog      AccessHistory
+	verifyFail     *repository.VerifyFailRepo
+	ipList         *repository.IPListRepo
+	locator        iplib.Locator
+	dynCfg         *config.DynamicConfig
+	session        config.SessionConfig
+	verifyMaxAge   int
+	methodPolicies []config.MethodPolicy
+}
+
+// AccessHistory supplies recent URL diversity for CC analysis. The timestamp is
+// a database-formatted lower bound; storage failures are returned to the caller.
+type AccessHistory interface {
+	CountDistinctURIByIPSince(ctx context.Context, ip, since string) (int64, error)
+	CountByIPSince(ctx context.Context, ip, since string) (int64, error)
 }
 
 // NewCCDetector 构造
 func NewCCDetector(
 	st store.StateStore,
-	accessLog *repository.AccessLogRepo,
+	accessLog AccessHistory,
 	verifyFail *repository.VerifyFailRepo,
 	ipList *repository.IPListRepo,
 	locator iplib.Locator,
 	dynCfg *config.DynamicConfig,
 	session config.SessionConfig,
+	methodPolicies ...config.MethodPolicy,
 ) *CCDetector {
 	return &CCDetector{
-		store:        st,
-		accessLog:    accessLog,
-		verifyFail:   verifyFail,
-		ipList:       ipList,
-		locator:      locator,
-		dynCfg:       dynCfg,
-		session:      session,
-		verifyMaxAge: session.VerifyCookieMaxAge,
+		store:          st,
+		accessLog:      accessLog,
+		verifyFail:     verifyFail,
+		ipList:         ipList,
+		locator:        locator,
+		dynCfg:         dynCfg,
+		session:        session,
+		verifyMaxAge:   session.VerifyCookieMaxAge,
+		methodPolicies: methodPolicies,
 	}
 }
 
 // Check 执行 CC 攻击检测主流程
 // 对应 PHP CCProtection::checkCCAttack()
 func (d *CCDetector) Check(ctx context.Context, rc *reqctx.RequestContext) *Result {
+	if d.methodDenied(rc) {
+		return block(model.AttackTypeCC, "请求方法不符合站点策略")
+	}
+	// CORS preflight does not execute an application action; forward it without
+	// browser fingerprint checks so API clients can negotiate allowed methods.
+	if rc.Method == "OPTIONS" && rc.Header.Get("Origin") != "" && rc.Header.Get("Access-Control-Request-Method") != "" {
+		return allow()
+	}
 	// 排除路径直接放行（对应 excluded_dirs 判断）
 	if rc.IsExcludedPath() {
 		return allow()
@@ -160,13 +176,27 @@ func (d *CCDetector) checkVerifyFailLimit(ctx context.Context, rc *reqctx.Reques
 	return false
 }
 
-// IsForbiddenMethod 判断是否为禁止的 HTTP 方法
-func IsForbiddenMethod(method string) bool {
-	m := method
-	for _, fm := range forbiddenMethods {
-		if m == fm {
-			return true
+func (d *CCDetector) methodDenied(rc *reqctx.RequestContext) bool {
+	rawHost := strings.ToLower(rc.R.Host)
+	host := strings.ToLower(rc.R.URL.Hostname())
+	if host == "" {
+		host = rawHost
+		if parsed, _, err := net.SplitHostPort(host); err == nil {
+			host = parsed
 		}
+	}
+	for _, policy := range d.methodPolicies {
+		path := rc.R.URL.Path
+		prefix := strings.TrimSuffix(policy.PathPrefix, "/")
+		if (host != policy.Host && rawHost != policy.Host) || (path != prefix && !strings.HasPrefix(path, prefix+"/")) {
+			continue
+		}
+		for _, allowed := range policy.AllowedMethods {
+			if rc.Method == allowed {
+				return false
+			}
+		}
+		return true
 	}
 	return false
 }

@@ -2,6 +2,7 @@ package reqctx
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
@@ -92,5 +93,14 @@ func TestNewRequestContextExtractsJSONValuesAndPreservesBody(t *testing.T) {
 	forwarded, _ := io.ReadAll(r.Body)
 	if string(forwarded) != body {
 		t.Fatalf("forwarded body = %q, want %q", forwarded, body)
+	}
+}
+
+func TestNewRequestContextRejectsOversizedJSONString(t *testing.T) {
+	request := httptest.NewRequest("POST", "http://example.test/submit", strings.NewReader(`{"comment":"`+strings.Repeat("a", 65537)+`"}`))
+	request.Header.Set("Content-Type", "application/json")
+	_, err := NewRequestContext(request, nil)
+	if !errors.Is(err, ErrInspectionLimit) {
+		t.Fatalf("error = %v, want inspection limit", err)
 	}
 }

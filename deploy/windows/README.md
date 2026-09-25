@@ -30,4 +30,4 @@ Set-ExecutionPolicy -Scope Process Bypass
 & 'C:\ProgramData\JingShield\upgrade.ps1' -Candidate 'D:\packages\jingshield-new.exe'
 ```
 
-升级脚本先迁移、再备份和替换；健康检查失败会恢复上一版。生产环境请替换自签名证书、将 `session.secure` 设为 `true`，并通过 Windows 防火墙禁止外部直连源站端口。
+升级脚本先迁移、再备份和替换；健康检查失败会恢复上一版。生产配置已启用 `session.secure`，请替换自签名证书，并通过 Windows 防火墙禁止外部直连源站端口。

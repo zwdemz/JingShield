@@ -10,6 +10,8 @@ package protection
 import (
 	"context"
 	"net/http"
+	"sync/atomic"
+	"time"
 
 	"jingshield/internal/config"
 	"jingshield/internal/iplib"
@@ -46,19 +48,24 @@ type Decision struct {
 
 // Engine 防护引擎
 type Engine struct {
-	dynCfg         *config.DynamicConfig
-	ipList         *iplist.Service
-	cc             *cc.CCDetector
-	xss            detector.Detector
-	sql            detector.Detector
-	pathTraversal  detector.Detector
-	ssrf           detector.Detector
-	xxe            detector.Detector
-	verify         *verify.Service
-	accessLog      *repository.AccessLogRepo
-	attackLog      *repository.AttackLogRepo
-	locator        iplib.Locator
-	policies       *policy.Service
+	dynCfg          *config.DynamicConfig
+	ipList          *iplist.Service
+	cc              *cc.CCDetector
+	xss             detector.Detector
+	sql             detector.Detector
+	pathTraversal   detector.Detector
+	ssrf            detector.Detector
+	xxe             detector.Detector
+	verify          *verify.Service
+	accessLog       *repository.AccessLogRepo
+	attackLog       *repository.AttackLogRepo
+	audit           *auditWriter
+	evaluated       atomic.Uint64
+	blocked         atomic.Uint64
+	challenged      atomic.Uint64
+	evaluationNanos atomic.Uint64
+	locator         iplib.Locator
+	policies        *policy.Service
 }
 
 // NewEngine 构造防护引擎
@@ -84,6 +91,7 @@ func NewEngine(
 		verify:        verifySvc,
 		accessLog:     accessLog,
 		attackLog:     attackLog,
+		audit:         newAuditWriter(accessLog, attackLog),
 		locator:       locator,
 		policies:      policies,
 	}
@@ -91,7 +99,18 @@ func NewEngine(
 
 // Evaluate 执行保护链，返回决策
 // 对应 PHP CCProtection::enable()
-func (e *Engine) Evaluate(ctx context.Context, rc *reqctx.RequestContext) Decision {
+func (e *Engine) Evaluate(ctx context.Context, rc *reqctx.RequestContext) (decision Decision) {
+	started := time.Now()
+	defer func() {
+		e.evaluated.Add(1)
+		e.evaluationNanos.Add(uint64(time.Since(started).Nanoseconds()))
+		switch decision.Action {
+		case DecisionBlock:
+			e.blocked.Add(1)
+		case DecisionVerify:
+			e.challenged.Add(1)
+		}
+	}()
 	// 1. 系统总开关：关闭则记录访问并放行
 	if !e.dynCfg.GetBool("system_status") {
 		e.logAccessAsync(ctx, rc, http.StatusOK)
@@ -249,50 +268,60 @@ func (e *Engine) Evaluate(ctx context.Context, rc *reqctx.RequestContext) Decisi
 // logAccessAsync 异步记录访问日志（不阻塞请求）
 // 对应 PHP logAccess()
 func (e *Engine) logAccessAsync(ctx context.Context, rc *reqctx.RequestContext, status int) {
-	go func() {
-		log := &model.AccessLog{
-			IP:        rc.IP,
-			Host:      rc.R.Host,
-			URI:       rc.URI,
-			Method:    rc.Method,
-			UserAgent: rc.UserAgent,
-			Referer:   rc.Header.Get("Referer"),
-			Status:    status,
-		}
-		_ = e.accessLog.Insert(context.Background(), log)
-	}()
+	e.audit.enqueueAccess(&model.AccessLog{
+		IP:        rc.IP,
+		Host:      rc.R.Host,
+		URI:       rc.URI,
+		Method:    rc.Method,
+		UserAgent: rc.UserAgent,
+		Referer:   rc.Header.Get("Referer"),
+		Status:    status,
+	})
 }
 
 func (e *Engine) logPolicyAsync(rc *reqctx.RequestContext, detail string, blocked bool) {
 	packet := rc.SanitizedRequestPacket()
-	go func() {
-		status := 2
-		if blocked {
-			status = 1
-		}
-		_, _ = e.attackLog.UpsertAttack(context.Background(), &model.AttackLog{EventID: rc.EventID, IP: rc.IP, IPLocation: e.locator.Lookup(rc.IP), Host: rc.R.Host, URI: rc.URI, Method: rc.Method, AttackType: model.AttackTypePolicy, AttackDetail: detail, RequestPacket: packet, AttackCount: 1, Status: status})
-	}()
+	status := 2
+	if blocked {
+		status = 1
+	}
+	e.audit.enqueueAttack(&model.AttackLog{EventID: rc.EventID, IP: rc.IP, IPLocation: e.locator.Lookup(rc.IP), Host: rc.R.Host, URI: rc.URI, Method: rc.Method, AttackType: model.AttackTypePolicy, AttackDetail: detail, RequestPacket: packet, AttackCount: 1, Status: status})
 }
 
 // logAttackAsync 异步记录攻击日志
 // 对应 PHP logAttack()
 func (e *Engine) logAttackAsync(ctx context.Context, rc *reqctx.RequestContext, attackType, detail string) {
 	packet := rc.SanitizedRequestPacket()
-	go func() {
-		ipLocation := e.locator.Lookup(rc.IP)
-		log := &model.AttackLog{
-			EventID:       rc.EventID,
-			IP:            rc.IP,
-			IPLocation:    ipLocation,
-			Host:          rc.R.Host,
-			URI:           rc.URI,
-			Method:        rc.Method,
-			AttackType:    attackType,
-			AttackDetail:  detail,
-			RequestPacket: packet,
-			AttackCount:   1,
-			Status:        1,
-		}
-		_, _ = e.attackLog.UpsertAttack(context.Background(), log)
-	}()
+	e.audit.enqueueAttack(&model.AttackLog{
+		EventID:       rc.EventID,
+		IP:            rc.IP,
+		IPLocation:    e.locator.Lookup(rc.IP),
+		Host:          rc.R.Host,
+		URI:           rc.URI,
+		Method:        rc.Method,
+		AttackType:    attackType,
+		AttackDetail:  detail,
+		RequestPacket: packet,
+		AttackCount:   1,
+		Status:        1,
+	})
+}
+
+// CloseLogging flushes pending audit records before the database closes.
+func (e *Engine) CloseLogging() {
+	e.audit.Close()
+}
+
+// Metrics returns aggregate WAF counters without client or rule identifiers.
+func (e *Engine) Metrics() map[string]any {
+	return map[string]any{
+		"evaluated_total":              e.evaluated.Load(),
+		"blocked_total":                e.blocked.Load(),
+		"challenged_total":             e.challenged.Load(),
+		"evaluation_nanoseconds_total": e.evaluationNanos.Load(),
+		"audit_dropped_total":          e.audit.dropped.Load(),
+		"audit_failed_total":           e.audit.failed.Load(),
+		"access_queue_depth":           len(e.audit.access),
+		"attack_queue_depth":           len(e.audit.attack),
+	}
 }

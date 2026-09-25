@@ -1,4 +1,5 @@
 # 鲸盾 Web 安全防护系统 - Go 版运行配置
+environment: dev # dev/test/prod；prod 必须配置稳定密钥并启用 Secure Cookie
 # 静态配置：仅启动时加载，修改后需重启或执行 reload
 
 # 服务监听配置
@@ -19,6 +20,8 @@ server:
   # 可信反向代理/CDN 节点。只有请求直接来自这些地址时才读取 X-Forwarded-For。
   # 直连部署请保持为空，避免客户端伪造来源 IP。
   trusted_proxies: []
+  # 可选：仅在明确指定的站点路径限制 HTTP 方法；未配置时不限制 REST/CORS 方法。
+  method_policies: []
 
 # 反向代理目标（被保护的真实站点）
 # Go WAF 将"干净请求"转发至此 upstream，攻击请求在代理层拦截

@@ -50,6 +50,7 @@ Linux 标准发行物是完整应用包。目标服务器不需要 Go、Node.js 
 | **安全监控** | 攻击趋势图、本机 CPU / 内存 / 磁盘 / 日志 / 业务速率监控和可配告警阈值 |
 | **事件运营** | 严重 / 高危 / 中危 / 低危 / 信息五级攻击分类，服务端筛选分页与流式 CSV 导出 |
 | **持久化与部署** | MySQL 持久化、幂等迁移、systemd 加固和升级失败自动回滚 |
+| **高并发审计** | 有界访问/攻击日志队列、访问日志批量写入和受保护的运行指标 |
 
 ---
 
@@ -268,6 +269,16 @@ $env:JINGSHIELD_SUDO_PASSWORD = 'sudo密码'
 - `/opt/jingshield/jingshield.env` 只能由 root 和服务组读取，重要升级前应备份 MySQL 与配置。
 - QQWry 数据为可选外部文件，不随项目发布；缺失时 IP 归属地功能自动降级。
 
+## 防护性能与多实例配置
+
+- 生产配置使用 `environment: prod`、至少 32 字节的 `JINGSHIELD_SESSION_KEY` 和 `session.secure: true`；启动时校验。开发与测试可使用 `dev`、`test`。
+- 请求体限制为 `server.max_body_bytes`（最高 32 MiB）。超过限制且声明了 `Content-Length` 的请求会在读取前拒绝；最多 8 个请求同时进入请求体检测，其余请求短暂等待或返回 503。JSON 检测最多解析 8192 个 token、单个字符串最多 64 KiB，超出时返回 413。
+- `server.method_policies` 可按站点和路径设置方法白名单，例如 `[{host: "api.example.com", path_prefix: "/v1", allowed_methods: [GET, POST, OPTIONS]}]`。未配置时不因 HTTP 方法阻断请求。
+- `GET /api/v1/system/waf-metrics` 需管理员会话，返回防护决策总数、累计耗时、审计队列深度及丢弃/失败总数。审计队列满时记录会丢弃并计数，应配置监控告警。
+- 单实例默认使用进程内状态。多实例部署可通过 `JINGSHIELD_REDIS_URL=redis://user:password@host:6379/0` 启用共享 CC 计数与一次性挑战状态；所有实例必须使用相同的 Session 密钥。Redis 需支持 `GETDEL`（6.2+），连接失败时服务拒绝启动。管理会话仍保存在本机，管理入口需固定路由到一个实例。
+
+容器构建可执行 `docker build -t jingshield:local .`。镜像自带 `deploy/docker/config.yaml`，启动时通过环境变量设置 `JINGSHIELD_DB_PASS`、`JINGSHIELD_SESSION_KEY`，并根据实际网络设置 `JINGSHIELD_DB_HOST` 与 `JINGSHIELD_UPSTREAM`；Linux 宿主机目标可在启动时添加 `--add-host=host.docker.internal:host-gateway`。管理入口应放在 HTTPS 终止代理之后，并按部署网络收紧 `admin_ips`。
+
 ---
 
 ## 当前范围
@@ -275,7 +286,7 @@ $env:JINGSHIELD_SUDO_PASSWORD = 'sudo密码'
 - TLS 终止使用单张静态证书；多站点 SNI 和 ACME 自动化尚未实现。
 - SQL / XSS 内置检测以 RE2 特征为主，语义检测持续建设中。
 - 管理员为统一系统级角色；细粒度 RBAC、MFA、OIDC 尚未包含。
-- 速率和验证短期状态为本机内存状态；Redis 共享状态接口已预留。
+- 审计日志异步写入；在数据库持续故障、队列满或关闭期限到达时，记录可能丢失，应监控 `audit_dropped_total` 与 `audit_failed_total`。
 
 ---
 

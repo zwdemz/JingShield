@@ -1,3 +1,5 @@
+environment: prod
+
 server:
   listen: "0.0.0.0:18080"
   admin_listen: "0.0.0.0:18080"
@@ -47,5 +49,5 @@ session:
   secret: ""
   max_age: 7200
   domain: ""
-  secure: false
+  secure: true
   verify_cookie_max_age: 3600
