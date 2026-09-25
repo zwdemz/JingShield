@@ -262,6 +262,8 @@ $env:JINGSHIELD_SUDO_PASSWORD = 'sudo-password'
 
 Use `--action upgrade` for upgrades. The upgrade path verifies the package, obtains an exclusive lock, validates the candidate binary, runs migrations before switching traffic, retains the current binary as a timestamped backup, and restores it automatically if the new service fails to start.
 
+SSH host keys must already be present in `~/.ssh/known_hosts` (or `--known-hosts`). For a new host, obtain its OpenSSH SHA-256 host-key fingerprint through an independent trusted channel and pass `--host-key-sha256 SHA256:...`. The pin is checked before an unknown key is accepted and is not silently saved. Do not trust an unverified `ssh-keyscan` result. The same options apply to `scripts/deploy-test-linux.py`; both clients reject unknown keys without a verified pin.
+
 ---
 
 ## Security Recommendations
