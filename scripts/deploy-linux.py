@@ -21,6 +21,8 @@ try:
 except ImportError as exc:  # pragma: no cover - operator dependency
     raise SystemExit("paramiko is required; create .venv and install deploy/requirements-deploy.txt") from exc
 
+from ssh_host_keys import configure_host_key_verification, validate_sha256_pin, verify_connected_host_key
+
 
 SECRET_KEYS = (
     "JINGSHIELD_DB_ADMIN_PASS",
@@ -85,7 +87,7 @@ def main() -> None:
     parser.add_argument("--action", choices=("install", "upgrade"), default="install")
     parser.add_argument("--key-file")
     parser.add_argument("--known-hosts", default=str(pathlib.Path.home() / ".ssh" / "known_hosts"))
-    parser.add_argument("--accept-new-host-key", action="store_true")
+    parser.add_argument("--host-key-sha256", help="out-of-band verified OpenSSH SHA256 host-key fingerprint")
     parser.add_argument("--admin-user")
     parser.add_argument("--admin-email", default="")
     parser.add_argument("--db-admin-user", default="root")
@@ -99,6 +101,11 @@ def main() -> None:
         parser.error("--admin-user is required for a non-interactive remote installation")
     if not args.install_root.startswith("/") or any(part in ("", "..") for part in args.install_root.split("/")[1:]):
         parser.error("--install-root must be a normalized absolute path")
+    if args.host_key_sha256:
+        try:
+            validate_sha256_pin(args.host_key_sha256)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     package = pathlib.Path(args.package).resolve()
     package_root = inspect_package(package)
@@ -108,13 +115,7 @@ def main() -> None:
 
     client = paramiko.SSHClient()
     known_hosts = pathlib.Path(args.known_hosts).expanduser()
-    client.load_system_host_keys()
-    if known_hosts.is_file():
-        client.load_host_keys(str(known_hosts))
-    if args.accept_new_host_key:
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    else:
-        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    configure_host_key_verification(client, known_hosts, args.host_key_sha256)
 
     connect_options: dict[str, object] = {
         "hostname": args.host,
@@ -131,10 +132,11 @@ def main() -> None:
     if args.key_file:
         connect_options["key_filename"] = str(pathlib.Path(args.key_file).expanduser())
     client.connect(**connect_options)
-
-    if args.accept_new_host_key:
-        known_hosts.parent.mkdir(parents=True, exist_ok=True)
-        client.save_host_keys(str(known_hosts))
+    try:
+        verify_connected_host_key(client, args.host_key_sha256)
+    except Exception:
+        client.close()
+        raise
 
     def run(command: str, *, sudo: bool = False, timeout: int = 600) -> str:
         if sudo:

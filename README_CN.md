@@ -263,6 +263,8 @@ $env:JINGSHIELD_SUDO_PASSWORD = 'sudo密码'
 
 升级使用 `--action upgrade`，升级脚本会校验完整包、获取独占锁、验证候选程序、提前执行数据库迁移、保留带时间戳的旧二进制，并在新服务启动失败时自动回滚。
 
+SSH 主机密钥必须已记录于 `~/.ssh/known_hosts`（或 `--known-hosts` 指定的文件）。首次连接新主机时，先通过独立可信渠道核对 OpenSSH SHA-256 主机密钥指纹，再传入 `--host-key-sha256 SHA256:...`；程序校验后才允许本次连接，不会暗中持久化新密钥。不要直接信任未经独立核验的 `ssh-keyscan` 输出。`scripts/deploy-test-linux.py` 使用同样的参数与拒绝策略。
+
 ---
 
 ## 安全建议

@@ -35,6 +35,9 @@ func TestUnicodePercentDecode(t *testing.T) {
 		{"%u0041", "A"},
 		{"%u003C", "<"},
 		{"%u4E2D", "\u4E2D"},
+		{"%uFFFF", "\uFFFF"},
+		{"%uD800", "\uFFFD"},
+		{"%u0000", "\x00"},
 		{"normal", "normal"},
 		{"%uZZZZ", "%uZZZZ"},
 	}
