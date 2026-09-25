@@ -19,12 +19,16 @@ import urllib.request
 
 import paramiko
 
+from ssh_host_keys import configure_host_key_verification, validate_sha256_pin, verify_connected_host_key
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", required=True)
     parser.add_argument("--user", required=True)
     parser.add_argument("--port", type=int, default=22)
+    parser.add_argument("--known-hosts", default=str(pathlib.Path.home() / ".ssh" / "known_hosts"))
+    parser.add_argument("--host-key-sha256", help="out-of-band verified OpenSSH SHA256 host-key fingerprint")
     parser.add_argument("--binary", default="bin/jingshield-linux-amd64")
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--verify-only", action="store_true")
@@ -33,6 +37,11 @@ def main() -> None:
     action.add_argument("--cleanup-stale-candidate", action="store_true")
     parser.add_argument("--install-root", default="/opt/jingshield")
     args = parser.parse_args()
+    if args.host_key_sha256:
+        try:
+            validate_sha256_pin(args.host_key_sha256)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     password = os.environ.get("JINGSHIELD_SSH_PASSWORD")
     if not password:
@@ -46,8 +55,13 @@ def main() -> None:
         raise SystemExit("--install-root must be a safe absolute directory")
 
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_verification(client, pathlib.Path(args.known_hosts).expanduser(), args.host_key_sha256)
     client.connect(args.host, port=args.port, username=args.user, password=password, timeout=15)
+    try:
+        verify_connected_host_key(client, args.host_key_sha256)
+    except Exception:
+        client.close()
+        raise
 
     def run(command: str, sudo: bool = False) -> str:
         full = f"sudo -S -p '' {command}" if sudo else command
