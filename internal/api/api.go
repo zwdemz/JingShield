@@ -17,6 +17,7 @@ import (
 
 	"jingshield/internal/config"
 	"jingshield/internal/model"
+	"jingshield/internal/operations"
 	"jingshield/internal/pkg/iputil"
 	"jingshield/internal/pkg/logx"
 	"jingshield/internal/policy"
@@ -36,6 +37,8 @@ type Dependencies struct {
 	AdminHandler    http.Handler
 	FallbackHandler http.Handler
 	WAFMetrics      func() map[string]any
+	StateBackend    string
+	Operations      *operations.Service
 }
 
 type API struct {
@@ -59,6 +62,9 @@ type API struct {
 	policies     *policy.Service
 	deviceEvents *repository.DeviceEventRepo
 	wafMetrics   func() map[string]any
+	startedAt    time.Time
+	stateBackend string
+	operations   *operations.Service
 }
 
 type sessionContextKey struct{}
@@ -77,6 +83,11 @@ func New(deps Dependencies) (http.Handler, error) {
 		fallback: deps.FallbackHandler, logDir: deps.StaticConfig.Log.Dir, policies: deps.Policies,
 		deviceEvents: repository.NewDeviceEventRepo(deps.DB),
 		wafMetrics:   deps.WAFMetrics,
+		startedAt:    time.Now(), stateBackend: deps.StateBackend,
+		operations: deps.Operations,
+	}
+	if a.stateBackend == "" {
+		a.stateBackend = "memory"
 	}
 
 	mux := http.NewServeMux()
@@ -87,15 +98,30 @@ func New(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/dashboard/trend", a.protected(http.HandlerFunc(a.dashboardTrend), false, false))
 	mux.Handle("GET /api/v1/dashboard/top-ips", a.protected(http.HandlerFunc(a.dashboardTopIPs), false, false))
 	mux.Handle("GET /api/v1/attacks", a.protected(http.HandlerFunc(a.attackList), false, false))
+	mux.Handle("GET /api/v1/attacks/ip-summary", a.protected(http.HandlerFunc(a.attackIPSummary), false, false))
 	mux.Handle("GET /api/v1/attacks/export", a.protected(http.HandlerFunc(a.attackExport), false, false))
 	mux.Handle("GET /api/v1/access-logs", a.protected(http.HandlerFunc(a.accessLogList), false, false))
 	mux.Handle("GET /api/v1/login-logs", a.protected(http.HandlerFunc(a.loginLogList), false, false))
 	mux.Handle("GET /api/v1/ip-list", a.protected(http.HandlerFunc(a.ipListGet), false, false))
 	mux.Handle("POST /api/v1/ip-list", a.protected(http.HandlerFunc(a.ipListAdd), false, true))
+	mux.Handle("POST /api/v1/ip-list/block-batch", a.protected(http.HandlerFunc(a.ipBlockBatch), false, true))
+	mux.Handle("GET /api/v1/ip-list/received-whitelist", a.protected(http.HandlerFunc(a.receivedWhitelistGet), false, false))
 	mux.Handle("DELETE /api/v1/ip-list/{id}", a.protected(http.HandlerFunc(a.ipListDelete), false, true))
 	mux.Handle("GET /api/v1/config", a.protected(http.HandlerFunc(a.configGet), false, false))
 	mux.Handle("PUT /api/v1/config", a.protected(http.HandlerFunc(a.configPut), false, true))
 	mux.Handle("GET /api/v1/system/status", a.protected(http.HandlerFunc(a.systemStatusGet), false, false))
+	mux.Handle("GET /api/v1/system/waf-status", a.protected(http.HandlerFunc(a.wafStatusGet), false, false))
+	mux.Handle("GET /api/v1/system/syslog", a.protected(http.HandlerFunc(a.syslogGet), false, false))
+	mux.Handle("PUT /api/v1/system/syslog", a.protected(http.HandlerFunc(a.syslogPut), false, true))
+	mux.Handle("POST /api/v1/system/syslog/sync", a.protected(http.HandlerFunc(a.syslogSync), false, true))
+	mux.Handle("GET /api/v1/system/linkage", a.protected(http.HandlerFunc(a.linkageGet), false, false))
+	mux.Handle("PUT /api/v1/system/linkage", a.protected(http.HandlerFunc(a.linkagePut), false, true))
+	mux.Handle("POST /api/v1/system/linkage/probe", a.protected(http.HandlerFunc(a.linkageProbe), false, true))
+	mux.Handle("POST /api/v1/system/linkage/block-batch", a.protected(http.HandlerFunc(a.linkageBlockBatch), false, true))
+	mux.Handle("GET /api/v1/system/linkage/whitelist/preview", a.protected(http.HandlerFunc(a.whitelistPreview), false, false))
+	mux.Handle("POST /api/v1/system/linkage/whitelist/sync", a.protected(http.HandlerFunc(a.whitelistPush), false, true))
+	mux.Handle("GET /api/v1/protection/settings", a.protected(http.HandlerFunc(a.protectionSettingsGet), false, false))
+	mux.Handle("PUT /api/v1/protection/settings", a.protected(http.HandlerFunc(a.protectionSettingsPut), false, true))
 	mux.Handle("PUT /api/v1/system/status", a.protected(http.HandlerFunc(a.systemStatusPut), false, true))
 	mux.Handle("GET /api/v1/system/resources", a.protected(http.HandlerFunc(a.systemResourcesGet), false, false))
 	mux.Handle("GET /api/v1/system/waf-metrics", a.protected(http.HandlerFunc(a.wafMetricsGet), false, false))
@@ -129,6 +155,9 @@ func New(deps Dependencies) (http.Handler, error) {
 	mux.Handle("GET /api/v1/policies/recommendations", a.protected(http.HandlerFunc(a.policyRecommendations), false, false))
 	mux.Handle("POST /api/v1/policies/recommendations/apply", a.protected(http.HandlerFunc(a.policyRecommendationApply), false, true))
 	mux.Handle("GET /openapi/v1/status", a.openAPIOnly(http.HandlerFunc(a.openAPIStatus)))
+	mux.Handle("GET /openapi/v1/capabilities", a.openAPIOnly(http.HandlerFunc(a.openAPICapabilities)))
+	mux.Handle("POST /openapi/v1/ip/block-batch", a.openAPIOnly(http.HandlerFunc(a.openAPIBlockBatch)))
+	mux.Handle("POST /openapi/v1/ip/whitelist/sync", a.openAPIOnly(http.HandlerFunc(a.openAPIWhitelistSync)))
 	mux.Handle("POST /openapi/v1/ip/block", a.openAPIOnly(http.HandlerFunc(a.openAPIBlockIP)))
 	mux.Handle("POST /openapi/v1/ip/unblock", a.openAPIOnly(http.HandlerFunc(a.openAPIUnblockIP)))
 	mux.Handle("POST /openapi/v1/events/{format}", a.openAPIOnly(http.HandlerFunc(a.deviceEventIngest)))
@@ -338,7 +367,9 @@ func (a *API) attackList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, -3, err.Error())
 		return
 	}
-	list, total, err := a.attacks.List(r.Context(), filter, page, size)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	list, total, err := a.attacks.List(ctx, filter, page, size)
 	if err != nil {
 		a.internalError(w, r, err)
 		return
@@ -357,6 +388,12 @@ func attackFilter(r *http.Request) (repository.AttackLogFilter, error) {
 	}
 	if filter.EventID != "" && !validEventID(filter.EventID) {
 		return filter, errors.New("事件编号格式非法")
+	}
+	if err := applyAttackIPFilter(&filter, r.URL.Query().Get("ip_mode")); err != nil {
+		return filter, err
+	}
+	if len(filter.AttackType) > 50 {
+		return filter, errors.New("攻击类型过长")
 	}
 	if value := r.URL.Query().Get("severity"); value != "" {
 		severity, err := strconv.Atoi(value)
@@ -560,7 +597,7 @@ func (a *API) configPut(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, "配置已更新", nil)
 }
 
-var statusKeys = []string{"system_status", "cc_protection_status", "xss_protection_status", "sql_protection_status", "path_traversal_protection_status", "ssrf_protection_status", "xxe_protection_status", "oversea_ip_status", "file_check_status"}
+var statusKeys = []string{"system_status", "cc_protection_status", "xss_protection_status", "sql_protection_status", "path_traversal_protection_status", "ssrf_protection_status", "xxe_protection_status", "scanner_protection_status", "policy_protection_status", "oversea_ip_status", "file_check_status"}
 
 func (a *API) systemStatusGet(w http.ResponseWriter, _ *http.Request) {
 	data := make(map[string]int, len(statusKeys))
@@ -586,12 +623,15 @@ func (a *API) systemStatusPut(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	changes := make(map[string]string, len(values))
 	for key, value := range values {
-		if err := a.dynamic.Set(r.Context(), key, strconv.Itoa(value)); err != nil {
-			a.internalError(w, r, err)
-			return
-		}
+		changes[key] = strconv.Itoa(value)
 	}
+	if err := a.dynamic.SetMany(r.Context(), changes); err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	logx.Info("引擎状态已更新", "user_id", currentSession(r).UserID, "changed_fields", len(changes))
 	writeOK(w, "系统状态已更新", nil)
 }
 
@@ -718,6 +758,9 @@ func validIPRule(rule string) bool {
 }
 
 func validDynamicConfig(key, value string) bool {
+	if _, managed := config.ProtectionDefaults()[key]; managed {
+		return config.ValidProtectionValue(key, value)
+	}
 	boolKeys := map[string]bool{"system_status": true, "cc_protection_status": true, "xss_protection_status": true, "sql_protection_status": true, "path_traversal_protection_status": true, "ssrf_protection_status": true, "xxe_protection_status": true, "file_check_status": true, "oversea_ip_status": true, "api_enabled": true}
 	if boolKeys[key] {
 		return value == "0" || value == "1"

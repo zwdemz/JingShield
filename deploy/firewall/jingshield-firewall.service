@@ -1,0 +1,36 @@
+[Unit]
+Description=JingShield dedicated Linux firewall bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jingshield-firewall
+Group=jingshield-firewall
+EnvironmentFile=/etc/jingshield-firewall/secret.env
+ExecStart=/usr/local/bin/jingshield-firewall -config /etc/jingshield-firewall/config.json
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=jingshield-firewall
+RuntimeDirectoryMode=0700
+StateDirectory=jingshield-firewall
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/run/jingshield-firewall
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

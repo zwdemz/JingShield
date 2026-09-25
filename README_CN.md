@@ -35,6 +35,14 @@ Linux 标准发行物是完整应用包。目标服务器不需要 Go、Node.js 
 
 ## 主要能力
 
+新增运营控制台功能及部署边界见 [WAF 运营、行为防护与同步](docs/operations-console.md)：紧凑页面、系统状态与按功能归位的 WAF 运行信息、分级引擎开关、IP 画像、500 项批量封禁、持久 Syslog 同步和同协议设备联动。
+
+运营要点：
+
+- 来源 IP 以 TCP 对端为起点；仅当直接对端是配置中的受控代理时，才从 X-Forwarded-For 右向左逐跳回溯。不可盲取最左侧 IP，也不可把整个内网段加入 `trusted_proxies`。
+- 本机白名单优先于黑名单；同协议节点支持白名单快照接收与显式下发。商业防火墙品牌名称仅是适配器标签，未验证的原生接口不宣称可直接封禁。
+- 行为检测支持观察与拦截模式，触发阈值可设为 2–1000；管理界面会把数字输入转换为接口所需的字符串后提交。Syslog 的发送成功仅表示传输成功，不等于对端已执行封禁。
+
 | 能力 | 说明 |
 |------|------|
 | **反向代理** | 基于 Go `httputil.ReverseProxy` 的请求转发、请求体限制和源站超时控制 |
@@ -282,6 +290,8 @@ $env:JINGSHIELD_SUDO_PASSWORD = 'sudo密码'
 - 单实例默认使用进程内状态。多实例部署可通过 `JINGSHIELD_REDIS_URL=redis://user:password@host:6379/0` 启用共享 CC 计数与一次性挑战状态；所有实例必须使用相同的 Session 密钥。Redis 需支持 `GETDEL`（6.2+），连接失败时服务拒绝启动。管理会话仍保存在本机，管理入口需固定路由到一个实例。
 
 容器构建可执行 `docker build -t jingshield:local .`。镜像自带 `deploy/docker/config.yaml`，启动时通过环境变量设置 `JINGSHIELD_DB_PASS`、`JINGSHIELD_SESSION_KEY`，并根据实际网络设置 `JINGSHIELD_DB_HOST` 与 `JINGSHIELD_UPSTREAM`；Linux 宿主机目标可在启动时添加 `--add-host=host.docker.internal:host-gateway`。管理入口应放在 HTTPS 终止代理之后，并按部署网络收紧 `admin_ips`。
+
+2026-09-25 的 NAS Docker 测试已验证管理页面、飞牛系统/音乐代理和下载服务入口可响应；当前测试配置保持 `trusted_proxies: []`，不会采信客户端自行添加的 XFF。行为阈值 `20` 的保存链路已通过浏览器模拟与 API 测试，但没有代管理员修改 NAS 上的现行阈值。缺少可选 `QQWry.Dat` 时 IP 归属地与海外 IP 检测会降级。此测试不代表已经完成公网入口、厂商防火墙或 Linux 内核封禁的实机验收。
 
 ---
 

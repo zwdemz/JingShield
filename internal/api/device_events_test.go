@@ -34,3 +34,25 @@ func TestParseDeviceEventRejectsInvalidInput(t *testing.T) {
 		t.Fatal("invalid event IP was accepted")
 	}
 }
+
+func TestDeviceAutoBlockRequiresExplicitCompatibleProtocol(t *testing.T) {
+	for _, test := range []struct {
+		body    string
+		allowed bool
+	}{
+		{`{"protocol":"jingshield-v1","device_type":"waf","event_ip":"192.0.2.5"}`, true},
+		{`{"protocol":"jingshield-v1","device_type":"firewall","event_ip":"192.0.2.5"}`, true},
+		{`{"vendor":"JingShield","event_ip":"192.0.2.5"}`, false},
+		{`{"protocol":"other","device_type":"waf","event_ip":"192.0.2.5"}`, false},
+		{`{"protocol":"jingshield-v1","device_type":"ids","event_ip":"192.0.2.5"}`, false},
+		{`{"protocol":"jingshield-v1","device_type":"waf","event_ip":"127.0.0.1"}`, false},
+	} {
+		event, err := parseGenericJSON([]byte(test.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if eventAllowsAutoBlock(event) != test.allowed {
+			t.Fatalf("unexpected autoblock permission: %#v", event)
+		}
+	}
+}

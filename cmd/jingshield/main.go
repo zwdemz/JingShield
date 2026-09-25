@@ -25,6 +25,7 @@ import (
 	"jingshield/internal/api"
 	"jingshield/internal/config"
 	"jingshield/internal/iplib"
+	"jingshield/internal/operations"
 	"jingshield/internal/pkg/logx"
 	"jingshield/internal/policy"
 	"jingshield/internal/protection"
@@ -243,7 +244,7 @@ func runMigrate(configPath string, stdout io.Writer) error {
 		return err
 	}
 	defer db.Close()
-	fmt.Fprintf(stdout, "数据库 %s 迁移完成（13 张业务表及默认配置）\n", cfg.Database.Name)
+	fmt.Fprintf(stdout, "数据库 %s 迁移完成（业务表、运营同步队列、处置审计及默认配置）\n", cfg.Database.Name)
 	return nil
 }
 
@@ -305,6 +306,7 @@ func run(configPath string) error {
 	}
 
 	var state store.StateStore
+	stateBackend := "memory"
 	var sharedChallenges verify.ChallengeStore
 	if redisURL := os.Getenv("JINGSHIELD_REDIS_URL"); redisURL != "" {
 		redisState, err := redisstore.New(ctx, redisURL)
@@ -313,6 +315,7 @@ func run(configPath string) error {
 		}
 		defer redisState.Close()
 		state = redisState
+		stateBackend = "redis"
 		sharedChallenges = redisState
 	} else {
 		memoryState := memory.New()
@@ -332,7 +335,19 @@ func run(configPath string) error {
 	ipListSvc := iplist.New(ipListRepo, locator, dynCfg)
 	verifySvc := verify.New(verifyFailRepo, ipListRepo, state, dynCfg, cfg.Session, sharedChallenges)
 	ccDetector := cc.NewCCDetector(state, accessRepo, verifyFailRepo, ipListRepo, locator, dynCfg, cfg.Session, cfg.Server.MethodPolicies...)
+	operationsService := operations.New(db)
+	if err := operationsService.Start(ctx); err != nil {
+		return fmt.Errorf("启动运营同步服务失败: %w", err)
+	}
+	defer func() {
+		closeContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := operationsService.Close(closeContext); err != nil {
+			logx.Warn("运营同步服务关闭超时", "err", err)
+		}
+	}()
 	engine := protection.NewEngine(dynCfg, ipListSvc, ccDetector, verifySvc, accessRepo, attackRepo, locator, policySvc, state)
+	engine.SetAttackPublisher(operationsService.Enqueue)
 	defer engine.CloseLogging()
 	proxyHandler, err := proxy.New(engine, verifySvc, dynCfg, siteRepo, cfg.Upstream, cfg.Server)
 	if err != nil {
@@ -341,6 +356,7 @@ func run(configPath string) error {
 	handler, err := api.New(api.Dependencies{
 		DB: db, DynamicConfig: dynCfg, State: state, StaticConfig: cfg, Sites: siteRepo,
 		Policies: policySvc, AdminHandler: webui.Handler(), FallbackHandler: proxyHandler,
+		Operations: operationsService, StateBackend: stateBackend,
 		WAFMetrics: func() map[string]any {
 			metrics := engine.Metrics()
 			for key, value := range verifySvc.Metrics() {

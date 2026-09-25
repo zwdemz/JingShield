@@ -32,8 +32,9 @@ type portHit struct {
 
 // Store 内存状态存储实现
 type Store struct {
-	windows sync.Map // map[string]*entry   —— 滑动窗口计数
-	ips     sync.Map // map[string]*ipEntry —— 单 IP 行为状态
+	windows  sync.Map // map[string]*entry   —— 滑动窗口计数
+	ips      sync.Map // map[string]*ipEntry —— 单 IP 行为状态
+	behavior behaviorMemory
 }
 
 // New 构造内存存储
@@ -61,6 +62,9 @@ func (s *Store) StartGC(ctx context.Context, interval time.Duration, maxIdle tim
 // gc 清理超时条目
 func (s *Store) gc(maxIdle time.Duration) {
 	now := time.Now()
+	s.behavior.mu.Lock()
+	s.behavior.gc(now)
+	s.behavior.mu.Unlock()
 	// 清理滑动窗口
 	s.windows.Range(func(k, v any) bool {
 		e := v.(*entry)
@@ -231,6 +235,7 @@ func (s *Store) ResetIP(_ context.Context, ip string) error {
 
 // ClearAll 清空全部状态（后台清理缓存）
 func (s *Store) ClearAll(_ context.Context) error {
+	s.clearBehavior()
 	s.windows.Range(func(k, _ any) bool { s.windows.Delete(k); return true })
 	s.ips.Range(func(k, _ any) bool { s.ips.Delete(k); return true })
 	return nil

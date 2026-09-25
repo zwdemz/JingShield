@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
 import { apiRequest } from '../api/client'
+import WAFStatusView from './WAFStatusView.vue'
 import type { AccessLog, PageData } from '../types/api'
 
 const loading = ref(false)
@@ -30,6 +31,7 @@ onMounted(() => load())
     <header class="page-header"><div><p class="eyebrow">ACCESS AUDIT</p><h1>访问审计</h1><p>核对经过防护链的请求、响应状态与耗时。</p></div><button class="secondary-button" :disabled="loading" @click="load()"><RefreshCw :size="17" :class="{ spinning: loading }" /> 刷新</button></header>
     <div class="filter-bar"><div class="filter-field"><Search :size="17" /><input v-model="ip" placeholder="按来源 IP 精确查询" @keyup.enter="load(true)" /></div><button class="primary-button" @click="load(true)">查询访问</button></div>
     <p v-if="error" class="inline-alert">{{ error }}</p>
+    <details class="context-details"><summary>请求与审计追加状态</summary><WAFStatusView section="audit" /></details>
     <article class="panel table-panel">
       <div class="table-meta"><span>请求流水</span><strong>共 {{ total.toLocaleString() }} 条记录</strong></div>
       <div class="table-scroll"><table><thead><tr><th>来源 IP</th><th>请求</th><th>主机</th><th>状态</th><th>响应耗时</th><th>时间</th></tr></thead><tbody>

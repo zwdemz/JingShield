@@ -2,19 +2,23 @@
 import { onMounted, reactive, ref } from 'vue'
 import { Plus, RefreshCw, Search, ShieldCheck, ShieldX, Trash2, X } from '@lucide/vue'
 import { APIError, apiRequest, jsonBody } from '../api/client'
-import type { IPListItem, PageData } from '../types/api'
+import type { IPListItem, PageData, WhitelistSource } from '../types/api'
+import BatchBlockDialog from '../components/BatchBlockDialog.vue'
 
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const notice = ref('')
 const items = ref<IPListItem[]>([])
+const received = ref<WhitelistSource[]>([])
+const receivedError = ref('')
 const total = ref(0)
 const page = ref(1)
 const size = 10
 const filterType = ref(0)
 const filterIP = ref('')
 const showForm = ref(false)
+const showBatch = ref(false)
 const form = reactive({ ip: '', type: 2, reason: '', expire_seconds: 3600 })
 const typeNames: Record<number, string> = { 1: '白名单', 2: '永久黑名单', 3: '临时黑名单' }
 
@@ -26,6 +30,12 @@ async function load(reset = false) {
   try { const data = await apiRequest<PageData<IPListItem>>(`/ip-list?${query}`); items.value = data.list; total.value = data.total; error.value = '' }
   catch (reason) { error.value = reason instanceof Error ? reason.message : 'IP 名单加载失败' }
   finally { loading.value = false }
+}
+
+/** Read source-owned snapshots separately from editable local rules. */
+async function loadReceived() {
+  try { received.value = await apiRequest<WhitelistSource[]>('/ip-list/received-whitelist'); receivedError.value = '' }
+  catch (reason) { receivedError.value = reason instanceof Error ? reason.message : '接收白名单加载失败' }
 }
 
 async function addItem() {
@@ -48,13 +58,14 @@ async function remove(item: IPListItem) {
 }
 
 function formatTime(value: string | null) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '永久' }
-onMounted(() => load())
+onMounted(() => { void load(); void loadReceived() })
 </script>
 
 <template>
   <section class="page-content">
     <header class="page-header"><div><p class="eyebrow">IP POLICY</p><h1>IP 策略</h1><p>统一管理精确 IP、CIDR 网段与 IPv4 通配符规则。</p></div><div class="header-actions"><button class="secondary-button" :disabled="loading" @click="load()"><RefreshCw :size="17" :class="{ spinning: loading }" /> 刷新</button><button class="primary-button" @click="showForm = true"><Plus :size="17" /> 新增规则</button></div></header>
     <p v-if="error" class="inline-alert">{{ error }}</p><p v-if="notice" class="inline-success">{{ notice }}</p>
+    <div class="bulk-toolbar"><span>批量封禁：单次最多 500 个精确 IP，自动跳过白名单。</span><button class="secondary-button" @click="showBatch = true">批量封禁 IP</button></div>
     <div class="filter-bar"><div class="filter-field"><Search :size="17" /><input v-model="filterIP" placeholder="IP / CIDR / 通配符" @keyup.enter="load(true)" /></div><div class="segmented"><button v-for="option in [{v:0,l:'全部'},{v:1,l:'白名单'},{v:2,l:'黑名单'},{v:3,l:'临时'}]" :key="option.v" :class="{ active: filterType === option.v }" @click="filterType = option.v; load(true)">{{ option.l }}</button></div></div>
     <article class="panel table-panel">
       <div class="table-meta"><span>策略清单</span><strong>{{ total }} 条规则</strong></div>
@@ -65,6 +76,8 @@ onMounted(() => load())
       <div class="pagination"><button :disabled="page <= 1 || loading" @click="page--; load()">上一页</button><span>第 {{ page }} 页</span><button :disabled="page * size >= total || loading" @click="page++; load()">下一页</button></div>
     </article>
 
+    <article class="panel table-panel"><div class="table-meta"><span>已接收白名单</span><button class="secondary-button" @click="loadReceived">刷新接收状态</button></div><p class="field-help">接收快照独立于本机手工规则；由原发送端下发新快照或空快照更新。</p><p v-if="receivedError" class="inline-alert" role="alert">{{ receivedError }}</p><div v-for="source in received" :key="source.source" class="capability-details"><strong>{{ source.source }}</strong><span> · {{ source.rules.length }} 条 · 版本 {{ source.revision }}</span><pre>{{ source.rules.join('\n') || '空快照' }}</pre></div><p v-if="!received.length && !receivedError" class="field-help">尚无接收的白名单快照。</p></article>
+    <BatchBlockDialog v-if="showBatch" @close="showBatch = false" @completed="result => { notice = `封禁 ${result.blocked} 个，白名单跳过 ${result.skipped_whitelist} 个`; load(true) }" />
     <div v-if="showForm" class="modal-layer" @mousedown.self="showForm = false">
       <form class="modal-card" @submit.prevent="addItem">
         <div class="modal-heading"><div><p class="eyebrow">NEW POLICY</p><h2>新增 IP 规则</h2></div><button type="button" aria-label="关闭" @click="showForm = false"><X :size="20" /></button></div>

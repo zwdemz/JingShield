@@ -15,14 +15,24 @@ const auditQueueSize = 2048
 
 // auditWriter bounds pending database work so slow storage cannot create one goroutine per request.
 type auditWriter struct {
-	accessRepo *repository.AccessLogRepo
-	attackRepo *repository.AttackLogRepo
-	access     chan *model.AccessLog
-	attack     chan *model.AttackLog
-	dropped    atomic.Uint64
-	failed     atomic.Uint64
-	closeBy    atomic.Int64
-	wg         sync.WaitGroup
+	accessRepo  *repository.AccessLogRepo
+	attackRepo  *repository.AttackLogRepo
+	access      chan *model.AccessLog
+	attack      chan *model.AttackLog
+	dropped     atomic.Uint64
+	failed      atomic.Uint64
+	closeBy     atomic.Int64
+	wg          sync.WaitGroup
+	publisherMu sync.RWMutex
+	publisher   func(context.Context, *model.AttackLog) error
+}
+
+// setAttackPublisher installs an optional metadata exporter. It is called only
+// after the original attack audit has been persisted successfully.
+func (w *auditWriter) setAttackPublisher(publisher func(context.Context, *model.AttackLog) error) {
+	w.publisherMu.Lock()
+	w.publisher = publisher
+	w.publisherMu.Unlock()
 }
 
 func newAuditWriter(access *repository.AccessLogRepo, attack *repository.AttackLogRepo) *auditWriter {
@@ -108,6 +118,17 @@ func (w *auditWriter) writeAttacks() {
 		if err != nil {
 			w.failed.Add(1)
 			logx.Error("攻击日志写入失败", "err", err)
+			continue
+		}
+		w.publisherMu.RLock()
+		publisher := w.publisher
+		w.publisherMu.RUnlock()
+		if publisher != nil {
+			publishContext, stop := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			// Export failures are tracked separately by operations; they never turn
+			// a locally persisted audit into a failed local audit or block traffic.
+			_ = publisher(publishContext, log)
+			stop()
 		}
 	}
 }

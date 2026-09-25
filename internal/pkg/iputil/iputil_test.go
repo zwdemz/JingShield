@@ -26,6 +26,58 @@ func TestGetClientIPWalksTrustedProxyChainFromRight(t *testing.T) {
 	}
 }
 
+func TestGetClientIPMultipleXFFHeaderLines(t *testing.T) {
+	r := httptest.NewRequest("GET", "http://example.test/", nil)
+	r.RemoteAddr = "10.0.0.3:4321"
+	r.Header.Add("X-Forwarded-For", "198.51.100.20")
+	r.Header.Add("X-Forwarded-For", "10.0.0.2")
+	if got := GetClientIP(r, []string{"10.0.0.2", "10.0.0.3"}); got != "198.51.100.20" {
+		t.Fatalf("GetClientIP() = %q, want external client", got)
+	}
+}
+
+func TestGetClientIPDoesNotSkipUnknownPrivateHop(t *testing.T) {
+	r := httptest.NewRequest("GET", "http://example.test/", nil)
+	r.RemoteAddr = "10.0.0.3:4321"
+	r.Header.Set("X-Forwarded-For", "198.51.100.20, 10.0.0.2")
+	if got := GetClientIP(r, []string{"10.0.0.3"}); got != "10.0.0.2" {
+		t.Fatalf("GetClientIP() = %q, want first untrusted hop", got)
+	}
+}
+
+func TestGetClientIPNeedsEveryProxyHopForOriginalClient(t *testing.T) {
+	r := httptest.NewRequest("GET", "http://example.test/", nil)
+	r.RemoteAddr = "10.0.0.3:4321"
+	r.Header.Set("X-Forwarded-For", "198.51.100.7, 172.32.0.1, 192.168.1.4")
+	for _, scenario := range []struct {
+		trusted []string
+		want    string
+	}{
+		{[]string{"10.0.0.3"}, "192.168.1.4"},
+		{[]string{"10.0.0.3", "192.168.1.4"}, "172.32.0.1"},
+		{[]string{"10.0.0.3", "192.168.1.4", "172.32.0.1"}, "198.51.100.7"},
+	} {
+		if got := GetClientIP(r, scenario.trusted); got != scenario.want {
+			t.Fatalf("GetClientIP(%v) = %q, want %q", scenario.trusted, got, scenario.want)
+		}
+	}
+}
+
+func TestIsPrivateIPDoesNotTreatAll172AsPrivate(t *testing.T) {
+	if IsPrivateIP("172.32.0.1") || !IsPrivateIP("172.31.255.255") {
+		t.Fatal("RFC1918 172.16/12 boundary classified incorrectly")
+	}
+}
+
+func TestGetClientIPIgnoresUntrustedPrefixLeftOfVerifiedClient(t *testing.T) {
+	r := httptest.NewRequest("GET", "http://example.test/", nil)
+	r.RemoteAddr = "10.0.0.3:4321"
+	r.Header.Set("X-Forwarded-For", "not-an-ip, 198.51.100.20")
+	if got := GetClientIP(r, []string{"10.0.0.3"}); got != "198.51.100.20" {
+		t.Fatalf("GetClientIP() = %q, want first untrusted address from right", got)
+	}
+}
+
 func TestGetClientIPIgnoresXRealIPFallback(t *testing.T) {
 	r := httptest.NewRequest("GET", "http://example.test/", nil)
 	r.RemoteAddr = "10.0.0.3:4321"

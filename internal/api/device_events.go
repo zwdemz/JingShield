@@ -9,15 +9,17 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"jingshield/internal/model"
+	"jingshield/internal/operations"
 	"jingshield/internal/pkg/iputil"
 )
 
 const maxDeviceEventBody = 1 << 20
 
 type normalizedDeviceEvent struct {
+	Protocol   string
+	DeviceType string
 	DeviceName string
 	Vendor     string
 	EventType  string
@@ -43,15 +45,17 @@ func (a *API) deviceEventIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dbEvent := &model.DeviceEvent{DeviceName: event.DeviceName, Vendor: event.Vendor, Format: format, SourceIP: iputil.GetClientIP(r, a.trusted), EventType: event.EventType, Severity: event.Severity, EventIP: event.EventIP, Message: event.Message, RawJSON: truncateEventRaw(string(body)), ActionTaken: "recorded"}
-	if a.dynamic.GetBool("device_auto_block_enabled") && event.Severity >= a.dynamic.GetIntDefault("device_auto_block_severity", 8) && net.ParseIP(event.EventIP) != nil {
+	if eventAllowsAutoBlock(event) && a.dynamic.GetBool("device_auto_block_enabled") && event.Severity >= a.dynamic.GetIntDefault("device_auto_block_severity", 8) {
 		seconds := a.dynamic.GetIntDefault("device_auto_block_seconds", 3600)
-		_, _ = a.ipList.DeleteByIP(r.Context(), event.EventIP)
-		expires := time.Now().Add(time.Duration(seconds) * time.Second)
-		if err := a.ipList.Add(r.Context(), event.EventIP, model.IPTypeTempBlacklist, "设备联动: "+event.Vendor+" / "+event.Message, &expires); err != nil {
+		result, err := a.ipList.BlockBatch(r.Context(), []string{event.EventIP}, "同协议安全设备事件自动封禁", seconds, "device:"+dbEvent.SourceIP)
+		if err != nil {
 			a.internalError(w, r, err)
 			return
 		}
-		dbEvent.ActionTaken = "temporary_block"
+		dbEvent.ActionTaken = "skipped_whitelist"
+		if result.Blocked > 0 {
+			dbEvent.ActionTaken = "temporary_block"
+		}
 	}
 	if err := a.deviceEvents.Insert(r.Context(), dbEvent); err != nil {
 		a.internalError(w, r, err)
@@ -71,7 +75,7 @@ func (a *API) deviceEventList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deviceSettingsGet(w http.ResponseWriter, _ *http.Request) {
-	writeOK(w, "success", map[string]any{"auto_block_enabled": a.dynamic.GetBool("device_auto_block_enabled"), "auto_block_severity": a.dynamic.GetIntDefault("device_auto_block_severity", 8), "auto_block_seconds": a.dynamic.GetIntDefault("device_auto_block_seconds", 3600)})
+	writeOK(w, "success", map[string]any{"auto_block_enabled": a.dynamic.GetBool("device_auto_block_enabled"), "auto_block_severity": a.dynamic.GetIntDefault("device_auto_block_severity", 8), "auto_block_seconds": a.dynamic.GetIntDefault("device_auto_block_seconds", 3600), "auto_block_protocol": operations.Protocol, "auto_block_device_types": []string{"waf", "firewall"}, "native_formats_record_only": true})
 }
 
 func (a *API) deviceSettingsPut(w http.ResponseWriter, r *http.Request) {
@@ -85,11 +89,9 @@ func (a *API) deviceSettingsPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	values := map[string]string{"device_auto_block_enabled": boolString(input.AutoBlockEnabled), "device_auto_block_severity": strconv.Itoa(input.AutoBlockSeverity), "device_auto_block_seconds": strconv.Itoa(input.AutoBlockSeconds)}
-	for key, value := range values {
-		if err := a.dynamic.Set(r.Context(), key, value); err != nil {
-			a.internalError(w, r, err)
-			return
-		}
+	if err := a.dynamic.SetMany(r.Context(), values); err != nil {
+		a.internalError(w, r, err)
+		return
 	}
 	writeOK(w, "安全设备联动策略已更新", nil)
 }
@@ -111,6 +113,8 @@ func parseDeviceEvent(format string, body []byte) (normalizedDeviceEvent, error)
 
 func parseGenericJSON(body []byte) (normalizedDeviceEvent, error) {
 	var value struct {
+		Protocol   string `json:"protocol"`
+		DeviceType string `json:"device_type"`
 		DeviceName string `json:"device_name"`
 		Vendor     string `json:"vendor"`
 		EventType  string `json:"event_type"`
@@ -124,7 +128,20 @@ func parseGenericJSON(body []byte) (normalizedDeviceEvent, error) {
 		return normalizedDeviceEvent{}, errors.New("通用 JSON 事件格式非法")
 	}
 	ip := firstNonEmpty(value.EventIP, value.SourceIP, value.SrcIP)
-	return normalizeEvent(value.DeviceName, value.Vendor, value.EventType, value.Severity, ip, value.Message)
+	event, err := normalizeEvent(value.DeviceName, value.Vendor, value.EventType, value.Severity, ip, value.Message)
+	event.Protocol = value.Protocol
+	event.DeviceType = value.DeviceType
+	return event, err
+}
+
+// eventAllowsAutoBlock distinguishes authenticated protocol requests from
+// vendor log ingestion. Log syntax/brand labels alone never authorize blocking.
+func eventAllowsAutoBlock(event normalizedDeviceEvent) bool {
+	if event.Protocol != operations.Protocol || (event.DeviceType != "waf" && event.DeviceType != "firewall") {
+		return false
+	}
+	_, err := iputil.NormalizeBlockIPs([]string{event.EventIP})
+	return err == nil
 }
 
 func parseSuricata(body []byte) (normalizedDeviceEvent, error) {

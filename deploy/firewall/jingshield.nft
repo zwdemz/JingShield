@@ -1,0 +1,12 @@
+# Review and run MANUALLY: /usr/sbin/nft -c -f jingshield.nft
+# Then: /usr/sbin/nft -f jingshield.nft
+# A pre-existing table makes this transaction fail; nothing is overwritten.
+create table inet jingshield
+add set inet jingshield jingshield_blocked_v4 { type ipv4_addr; flags timeout; size 20000; comment "jingshield-managed-v1"; }
+add set inet jingshield jingshield_blocked_v6 { type ipv6_addr; flags timeout; size 20000; comment "jingshield-managed-v1"; }
+add chain inet jingshield input { type filter hook input priority -10; policy accept; }
+add chain inet jingshield forward { type filter hook forward priority -10; policy accept; }
+add rule inet jingshield input ip saddr @jingshield_blocked_v4 counter drop
+add rule inet jingshield input ip6 saddr @jingshield_blocked_v6 counter drop
+add rule inet jingshield forward ip saddr @jingshield_blocked_v4 counter drop
+add rule inet jingshield forward ip6 saddr @jingshield_blocked_v6 counter drop

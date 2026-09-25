@@ -12,6 +12,7 @@ const router = useRouter()
 const mobileOpen = ref(false)
 const navItems = [
   { name: 'dashboard', label: '安全态势', icon: Gauge },
+  { name: 'system-status', label: '系统状态', icon: ShieldCheck },
   { name: 'attacks', label: '攻击事件', icon: Activity },
   { name: 'access', label: '访问审计', icon: FileClock },
   { name: 'sites', label: '防护站点', icon: Globe2 },
@@ -41,10 +42,10 @@ async function logout() {
           <component :is="item.icon" :size="19" /><span>{{ item.label }}</span><i></i>
         </RouterLink>
       </nav>
-      <div class="sidebar-health">
+      <RouterLink :to="{ name: 'system-status' }" class="sidebar-health">
         <div class="health-ring"><ShieldCheck :size="24" /></div>
-        <div><span>防护引擎</span><strong><i class="pulse-dot"></i> 运行中</strong></div>
-      </div>
+        <div><span>主机资源 / 服务概况</span><strong>查看系统状态</strong></div>
+      </RouterLink>
       <div class="sidebar-user">
         <span class="avatar">{{ auth.user?.username.slice(0, 1).toUpperCase() }}</span>
         <div><strong>{{ auth.user?.username }}</strong><small>系统管理员</small></div>
@@ -56,7 +57,7 @@ async function logout() {
       <header class="topbar">
         <button class="mobile-menu" aria-label="打开菜单" @click="mobileOpen = true"><Menu :size="22" /></button>
         <div class="breadcrumb"><span>鲸盾控制台</span><b>/</b><strong>{{ navItems.find((item) => item.name === route.name)?.label || '安全中心' }}</strong></div>
-        <div class="topbar-status"><span class="pulse-dot"></span> 节点在线</div>
+        <RouterLink class="topbar-status" :to="{ name: 'system-status' }">运行状态</RouterLink>
       </header>
       <main class="page-stage"><RouterView /></main>
     </section>

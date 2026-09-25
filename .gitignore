@@ -43,6 +43,7 @@ coverage/
 # Frontend dependencies and build output
 web/node_modules/
 web/dist/
+web/test-artifacts/
 
 # Local/editor files
 .DS_Store

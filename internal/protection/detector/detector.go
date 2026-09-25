@@ -12,6 +12,7 @@ import (
 // Result 检测结果
 type Result struct {
 	Detected    bool   // 是否命中攻击
+	ObserveOnly bool   // 只记录观察事件，不得由此结果阻断请求
 	AttackType  string // 攻击类型（对应 model 攻击类型常量）
 	Detail      string // 攻击详情
 	Code        int    // 错误码（对应 errx.CodeXSSAttack 等）

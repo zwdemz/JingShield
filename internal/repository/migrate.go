@@ -202,10 +202,17 @@ ON DUPLICATE KEY UPDATE config_key = VALUES(config_key)`},
 // Migrate creates all business tables and inserts missing default settings.
 // Existing configuration values and application data are preserved.
 func Migrate(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, blockAuditSchema); err != nil {
+		return fmt.Errorf("创建 IP 处置审计表失败: %w", err)
+	}
 	for _, m := range schemaMigrations {
 		if _, err := db.ExecContext(ctx, m.sql); err != nil {
 			return fmt.Errorf("执行迁移 %s 失败: %w", m.name, err)
 		}
+	}
+	// Operational queue metadata depends on jyj_config existing on fresh installs.
+	if err := MigrateOperations(ctx, db); err != nil {
+		return err
 	}
 	if _, err := ensureColumn(ctx, db, "jyj_users", "must_change_password",
 		"ALTER TABLE jyj_users ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 1 AFTER status"); err != nil {

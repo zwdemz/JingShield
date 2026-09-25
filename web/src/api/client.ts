@@ -38,7 +38,8 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
       headers,
       credentials: 'include',
     })
-  } catch {
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === 'AbortError') throw reason
     throw new APIError('无法连接到鲸盾服务，请检查服务状态', -1, 0)
   }
 

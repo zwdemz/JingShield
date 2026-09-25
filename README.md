@@ -33,6 +33,14 @@ The standard Linux release is a self-contained application package. Operators do
 
 ## Highlights
 
+See [WAF operations, behavioral protection and synchronization](docs/operations-console.md) for compact pages, the System Status view and WAF information grouped into related features, engine profiles, IP attribution, 500-entry atomic blocking, durable syslog delivery and explicitly compatible peer integration. Native vendor support and live-device validation are documented separately.
+
+Operational boundaries:
+
+- Client identity starts with the TCP peer. Walk X-Forwarded-For from right to left only when that peer is an explicitly trusted, controlled proxy; never blindly select the leftmost address or trust an entire private range.
+- Local allowlists take precedence over blocklists. Same-protocol peers can receive and explicitly push allowlist snapshots. Commercial firewall names are adapter labels, not claims of verified native API support.
+- Behavioral protection supports observe/block modes and thresholds from 2 to 1000. The console serializes numeric inputs as the string-valued API requires. Successful syslog transport is not proof that a remote device enforced a block.
+
 | Capability | Description |
 |------------|-------------|
 | **Reverse Proxy** | Go `httputil.ReverseProxy` with body-size limits and upstream timeout controls |
@@ -282,6 +290,8 @@ Use `--action upgrade` for upgrades. The upgrade path verifies the package, obta
 - Optional `server.method_policies` restrict methods for explicit host/path pairs; REST and CORS methods are unrestricted by default.
 - Authenticated `GET /api/v1/system/waf-metrics` exposes decision, challenge, policy match, queue depth, and audit loss counters. Audit records are queued in bounded memory and access records are inserted in batches.
 - Build the container with `docker build -t jingshield:local .`. The image includes `deploy/docker/config.yaml`; supply `JINGSHIELD_DB_PASS` and `JINGSHIELD_SESSION_KEY`, then set `JINGSHIELD_DB_HOST` and `JINGSHIELD_UPSTREAM` for your network. On Linux, the default host target needs `--add-host=host.docker.internal:host-gateway`. Put the admin endpoint behind HTTPS and narrow `admin_ips` to the deployment network.
+
+The 2026-09-25 NAS Docker trial verified responses from the management console, NAS system/music proxy paths, and the download-service entry point. Its `trusted_proxies: []` setting ignores client-supplied XFF. Saving a behavioral threshold of `20` passed mocked-browser and API tests; the live NAS policy was not changed on the administrator's behalf. Without the optional `QQWry.Dat`, geolocation and overseas-IP checks degrade. This trial does not constitute public-ingress, commercial-firewall, or Linux kernel blocking acceptance.
 
 ---
 

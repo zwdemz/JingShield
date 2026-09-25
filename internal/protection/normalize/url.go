@@ -55,8 +55,16 @@ func unicodePercentDecode(s string) string {
 	i := 0
 	for i < len(s) {
 		if i+5 < len(s) && s[i] == '%' && (s[i+1] == 'u' || s[i+1] == 'U') {
-			if v, err := strconv.ParseUint(s[i+2:i+6], 16, 32); err == nil {
-				b.WriteRune(rune(v))
+			// UnquoteChar returns a rune directly, avoiding a narrowing integer cast.
+			// A lone UTF-16 surrogate is replaced, matching WriteRune's old behavior.
+			codepoint := s[i+2 : i+6]
+			if decoded, _, _, err := strconv.UnquoteChar(`\u`+codepoint, '"'); err == nil {
+				b.WriteRune(decoded)
+				i += 6
+				continue
+			}
+			if _, err := strconv.ParseUint(codepoint, 16, 16); err == nil {
+				b.WriteRune('\uFFFD')
 				i += 6
 				continue
 			}

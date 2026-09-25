@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"database/sql"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -68,6 +69,9 @@ func (d *DynamicConfig) Load(ctx context.Context) error {
 	// 先装入默认配置作为兜底
 	cfg := make(map[string]string, len(defaultDynamicConfig))
 	for k, v := range defaultDynamicConfig {
+		cfg[k] = v
+	}
+	for k, v := range ProtectionDefaults() {
 		cfg[k] = v
 	}
 
@@ -184,19 +188,39 @@ func (d *DynamicConfig) All() map[string]string {
 
 // Set 更新单条配置（写库 + 更新内存）
 func (d *DynamicConfig) Set(ctx context.Context, key, value string) error {
+	return d.SetMany(ctx, map[string]string{key: value})
+}
+
+// SetMany atomically persists a validated configuration group and publishes the
+// same snapshot to readers. A database/commit error leaves memory unchanged.
+func (d *DynamicConfig) SetMany(ctx context.Context, values map[string]string) error {
 	if d.db == nil {
 		return ErrDBUnavailable
 	}
-	// INSERT ... ON DUPLICATE KEY UPDATE，对应 PHP setConfig() 的 SQL
-	_, err := d.db.ExecContext(ctx,
-		"INSERT INTO jyj_config (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = ?",
-		key, value, value)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	d.mu.Lock()
-	d.m[key] = value
-	d.mu.Unlock()
+	defer tx.Rollback()
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := values[key]
+		if _, err := tx.ExecContext(ctx, "INSERT INTO jyj_config (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = ?", key, value, value); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	for key, value := range values {
+		d.m[key] = value
+	}
 	return nil
 }
 

@@ -4,6 +4,95 @@ export interface APIEnvelope<T> {
   data: T
 }
 
+export interface BatchBlockResult {
+  requested: number
+  unique: number
+  blocked: number
+  skipped_whitelist: number
+  skipped_ips: string[]
+}
+
+export interface AttackIPSummary {
+  ip: string
+  records: number
+  attack_count: number
+  blocked_records: number
+  observed_records: number
+  max_severity: number
+  first_seen: string | null
+  last_seen: string | null
+  attack_types: { attack_type: string; count: number }[]
+  hosts: { host: string; count: number }[]
+  list_status: 'none' | 'whitelist' | 'blacklist'
+}
+
+export interface ProtectionSettings {
+  profile: 'low' | 'standard' | 'strict' | 'custom'
+  profiles: { id: 'low' | 'standard' | 'strict'; label: string; description: string; values: Record<string, string> }[]
+  values: Record<string, string>
+  engines: { key: string; label: string; enabled: boolean }[]
+}
+
+export interface WAFRuntimeStatus {
+  waf_enabled: boolean
+  started_at: string
+  uptime_seconds: number
+  state_backend: string
+  shared_state: boolean
+  metrics: Record<string, number | Record<string, number | string | boolean>>
+  protection: ProtectionSettings
+  sites: { total: number; enabled: number }
+  server_time: string
+}
+
+export interface SyslogConfig {
+  enabled: boolean
+  transport: 'tls' | 'tcp' | 'udp'
+  address: string
+  server_name: string
+  facility: number
+  timeout_seconds: number
+  max_retries: number
+  queue_capacity: number
+}
+
+export interface SyslogStatus {
+  running: boolean
+  queued: number
+  failed: number
+  queue_capacity: number
+  sent_total: number
+  retried_total: number
+  dropped_total: number
+  last_success: string
+  last_error: string
+  delivery_semantics: string
+}
+
+export interface LinkageConfig {
+  enabled: boolean
+  source_id: string
+  device_vendor: '' | 'jingshield' | 'system' | '360' | 'huawei' | 'zte' | 'cisco' | 'adapter'
+  protocol: 'jingshield-v1'
+  device_type: 'waf' | 'firewall'
+  endpoint: string
+  secret_env: string
+  timeout_seconds: number
+}
+
+export interface LinkageStatus {
+  last_probe: string
+  last_success: string
+  last_error: string
+  compatible: boolean
+  last_result: BatchBlockResult | null
+  last_whitelist: WhitelistSyncResult | null
+}
+
+export interface WhitelistSyncResult { source: string; revision: number; count: number; digest: string }
+export interface WhitelistPreview { source: string; count: number; rules: string[]; digest: string }
+export interface WhitelistSource { source: string; revision: number; rules: string[] }
+
 export interface SessionUser {
   user_id: number
   username: string

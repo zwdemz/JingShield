@@ -26,7 +26,7 @@ func NewIPListRepo(db *sql.DB) *IPListRepo {
 // IsWhitelisted 判断 IP 是否在白名单（type=1）
 // 对应 PHP checkWhitelistIP()
 func (r *IPListRepo) IsWhitelisted(ctx context.Context, ip string) (bool, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT ip FROM jyj_ip_list WHERE type = ?", model.IPTypeWhitelist)
+	rows, err := r.db.QueryContext(ctx, "SELECT ip FROM jyj_ip_list WHERE type = ? UNION SELECT rule FROM jyj_synced_whitelist", model.IPTypeWhitelist)
 	if err != nil {
 		return false, err
 	}

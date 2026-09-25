@@ -18,6 +18,8 @@ const router = createRouter({
         { path: 'ip-list', name: 'ip-list', component: () => import('./views/IPListView.vue') },
         { path: 'policies', name: 'policies', component: () => import('./views/PolicyView.vue') },
         { path: 'settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
+        { path: 'system-status', name: 'system-status', component: () => import('./views/SystemStatusView.vue') },
+        { path: 'waf-status', redirect: { name: 'system-status' } },
 		{ path: 'users', name: 'users', component: () => import('./views/UsersView.vue') },
 		{ path: 'integration', name: 'integration', component: () => import('./views/IntegrationView.vue') },
       ],

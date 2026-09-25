@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 )
 
@@ -14,7 +15,8 @@ const maxForwardedForEntries = 32
 
 // GetClientIP 从 HTTP 请求提取客户端真实 IP
 // 只有直接连接方属于 trustedProxies 时才信任 X-Forwarded-For。
-// X-Forwarded-For 从右向左解析，跳过可信代理并返回第一个非可信地址。
+// X-Forwarded-For 按出现顺序合并多行，从右向左跳过可信代理并返回第一个非可信地址。
+// 不盲选最左侧公网 IP：未知中间代理也可能由客户端伪造。
 // X-Real-IP 不作为回退来源，因为它没有独立的可信链信息。
 func GetClientIP(r *http.Request, trustedProxies []string) string {
 	peer := remoteIP(r.RemoteAddr)
@@ -22,24 +24,27 @@ func GetClientIP(r *http.Request, trustedProxies []string) string {
 		return peer
 	}
 
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > maxForwardedForEntries {
+	values := r.Header.Values("X-Forwarded-For")
+	if len(values) == 0 {
+		return peer
+	}
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, raw := range strings.Split(value, ",") {
+			if len(parts) >= maxForwardedForEntries {
+				return peer
+			}
+			parts = append(parts, strings.TrimSpace(raw))
+		}
+	}
+	for i := len(parts) - 1; i >= 0; i-- {
+		candidate, err := netip.ParseAddr(parts[i])
+		if err != nil || candidate.Zone() != "" {
 			return peer
 		}
-		valid := true
-		for i := len(parts) - 1; i >= 0; i-- {
-			candidate := strings.TrimSpace(parts[i])
-			if net.ParseIP(candidate) == nil {
-				valid = false
-				break
-			}
-			if !matchesAny(candidate, trustedProxies) {
-				return candidate
-			}
-		}
-		if !valid {
-			return peer
+		address := candidate.Unmap().String()
+		if !matchesAny(address, trustedProxies) {
+			return address
 		}
 	}
 	return peer

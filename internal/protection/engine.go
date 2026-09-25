@@ -91,7 +91,7 @@ func NewEngine(
 		pathTraversal: detector.NewPathTraversalDetector(),
 		ssrf:          detector.NewSSRFDetector(),
 		xxe:           detector.NewXXEDetector(),
-		scanner:       detector.NewScannerDetector(state),
+		scanner:       detector.NewScannerDetector(state, dynCfg),
 		verify:        verifySvc,
 		accessLog:     accessLog,
 		attackLog:     attackLog,
@@ -121,7 +121,13 @@ func (e *Engine) Evaluate(ctx context.Context, rc *reqctx.RequestContext) (decis
 		return Decision{Action: DecisionAllow}
 	}
 
-	// 2. 黑名单检测 -> 403
+	// 2. 白名单优先：接收快照生效后覆盖旧黑名单命中，不删除旧记录。
+	if e.ipList.IsWhitelisted(ctx, rc.IP) {
+		e.logAccessAsync(ctx, rc, http.StatusOK)
+		return Decision{Action: DecisionAllow}
+	}
+
+	// 3. 黑名单检测 -> 403
 	if e.ipList.IsBlacklisted(ctx, rc.IP) {
 		e.logAttackAsync(ctx, rc, model.AttackTypeBlacklist, "IP已被列入黑名单")
 		e.logAccessAsync(ctx, rc, http.StatusForbidden)
@@ -132,12 +138,6 @@ func (e *Engine) Evaluate(ctx context.Context, rc *reqctx.RequestContext) (decis
 			ErrorMessage: "IP已被列入黑名单",
 			AttackType:   model.AttackTypeBlacklist,
 		}
-	}
-
-	// 3. 白名单检测 -> 放行（记录访问）
-	if e.ipList.IsWhitelisted(ctx, rc.IP) {
-		e.logAccessAsync(ctx, rc, http.StatusOK)
-		return Decision{Action: DecisionAllow}
 	}
 
 	// 4. 海外 IP 检测 -> 403
@@ -154,7 +154,7 @@ func (e *Engine) Evaluate(ctx context.Context, rc *reqctx.RequestContext) (decis
 	}
 
 	// 5. CC 攻击检测 -> Block 或 Verify
-	if e.policies != nil {
+	if e.policies != nil && e.dynCfg.GetDefault("policy_protection_status", "1") == "1" {
 		if match := e.policies.Match(ctx, rc); match != nil {
 			e.logPolicyAsync(rc, match.Detail, match.Action == policy.ActionBlock)
 			if match.Action == policy.ActionBlock {
@@ -165,12 +165,8 @@ func (e *Engine) Evaluate(ctx context.Context, rc *reqctx.RequestContext) (decis
 	}
 
 	// 6. CC 攻击检测 -> Block 或 Verify
-	if e.scanner != nil {
-		if r := e.scanner.Check(ctx, rc); r != nil && r.Detected {
-			e.logAttackAsync(ctx, rc, r.AttackType, r.Detail)
-			e.logAccessAsync(ctx, rc, http.StatusForbidden)
-			return Decision{Action: DecisionBlock, StatusCode: http.StatusForbidden, ErrorCode: r.Code, ErrorMessage: "检测到异常扫描行为", AttackType: r.AttackType, AttackDetail: r.Detail}
-		}
+	if decision := e.evaluateBehavior(ctx, rc); decision != nil {
+		return *decision
 	}
 	ccResult := e.cc.Check(ctx, rc)
 	switch ccResult.Action {
@@ -290,18 +286,40 @@ func (e *Engine) logAccessAsync(ctx context.Context, rc *reqctx.RequestContext, 
 	})
 }
 
+// evaluateBehavior records observations without terminating the remaining WAF
+// chain; only a blocking result may short-circuit evaluation or log a 403.
+func (e *Engine) evaluateBehavior(ctx context.Context, rc *reqctx.RequestContext) *Decision {
+	if e.scanner == nil {
+		return nil
+	}
+	result := e.scanner.Check(ctx, rc)
+	if result == nil || !result.Detected {
+		return nil
+	}
+	if result.ObserveOnly {
+		e.logAttackEvent(rc, result.AttackType, result.Detail, 2)
+		return nil
+	}
+	e.logAttackAsync(ctx, rc, result.AttackType, result.Detail)
+	e.logAccessAsync(ctx, rc, http.StatusForbidden)
+	return &Decision{Action: DecisionBlock, StatusCode: http.StatusForbidden, ErrorCode: result.Code, ErrorMessage: "检测到异常扫描行为", AttackType: result.AttackType, AttackDetail: result.Detail}
+}
+
 func (e *Engine) logPolicyAsync(rc *reqctx.RequestContext, detail string, blocked bool) {
-	packet := rc.SanitizedRequestPacket()
 	status := 2
 	if blocked {
 		status = 1
 	}
-	e.audit.enqueueAttack(&model.AttackLog{EventID: rc.EventID, IP: rc.IP, IPLocation: e.locator.Lookup(rc.IP), Host: rc.R.Host, URI: rc.URI, Method: rc.Method, AttackType: model.AttackTypePolicy, AttackDetail: detail, RequestPacket: packet, AttackCount: 1, Status: status})
+	e.logAttackEvent(rc, model.AttackTypePolicy, detail, status)
 }
 
 // logAttackAsync 异步记录攻击日志
 // 对应 PHP logAttack()
 func (e *Engine) logAttackAsync(ctx context.Context, rc *reqctx.RequestContext, attackType, detail string) {
+	e.logAttackEvent(rc, attackType, detail, 1)
+}
+
+func (e *Engine) logAttackEvent(rc *reqctx.RequestContext, attackType, detail string, status int) {
 	packet := rc.SanitizedRequestPacket()
 	e.audit.enqueueAttack(&model.AttackLog{
 		EventID:       rc.EventID,
@@ -314,7 +332,7 @@ func (e *Engine) logAttackAsync(ctx context.Context, rc *reqctx.RequestContext, 
 		AttackDetail:  detail,
 		RequestPacket: packet,
 		AttackCount:   1,
-		Status:        1,
+		Status:        status,
 	})
 }
 
@@ -323,9 +341,15 @@ func (e *Engine) CloseLogging() {
 	e.audit.Close()
 }
 
+// SetAttackPublisher configures the asynchronous audit-to-integration publisher.
+// A nil publisher disables forwarding; delivery failures remain in audit metrics.
+func (e *Engine) SetAttackPublisher(publisher func(context.Context, *model.AttackLog) error) {
+	e.audit.setAttackPublisher(publisher)
+}
+
 // Metrics returns aggregate WAF counters without client or rule identifiers.
 func (e *Engine) Metrics() map[string]any {
-	return map[string]any{
+	metrics := map[string]any{
 		"evaluated_total":              e.evaluated.Load(),
 		"blocked_total":                e.blocked.Load(),
 		"challenged_total":             e.challenged.Load(),
@@ -334,5 +358,11 @@ func (e *Engine) Metrics() map[string]any {
 		"audit_failed_total":           e.audit.failed.Load(),
 		"access_queue_depth":           len(e.audit.access),
 		"attack_queue_depth":           len(e.audit.attack),
+		"access_queue_capacity":        cap(e.audit.access),
+		"attack_queue_capacity":        cap(e.audit.attack),
 	}
+	if behavior, ok := e.scanner.(interface{ Metrics() map[string]any }); ok {
+		metrics["behavior"] = behavior.Metrics()
+	}
+	return metrics
 }

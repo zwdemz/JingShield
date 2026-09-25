@@ -1,0 +1,13 @@
+{
+  "listen": "127.0.0.1:9443",
+  "tls_cert": "/etc/jingshield-firewall/server.crt",
+  "tls_key": "/etc/jingshield-firewall/server.key",
+  "api_key_env": "JINGSHIELD_LINKAGE_FIREWALL_KEY",
+  "backend": "nftables",
+  "apply": false,
+  "allowed_cidrs": ["127.0.0.1/32", "::1/128"],
+  "whitelist_cidrs": ["192.0.2.10/32"],
+  "whitelist_state_file": "/var/lib/jingshield-firewall/whitelist.json",
+  "requests_per_minute": 60,
+  "request_timeout_seconds": 8
+}

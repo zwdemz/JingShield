@@ -96,6 +96,8 @@ type AttackLogFilter struct {
 	EventID    string
 	AttackType string
 	IP         string
+	IPFrom     string
+	IPTo       string
 	Severity   int
 	StartAt    *time.Time
 	EndAt      *time.Time
@@ -115,6 +117,10 @@ func buildAttackLogWhere(filter AttackLogFilter) (string, []any) {
 	if filter.IP != "" {
 		where += " AND ip = ?"
 		args = append(args, filter.IP)
+	}
+	if filter.IPFrom != "" && filter.IPTo != "" {
+		where += " AND LENGTH(INET6_ATON(ip)) = LENGTH(INET6_ATON(?)) AND INET6_ATON(ip) BETWEEN INET6_ATON(?) AND INET6_ATON(?)"
+		args = append(args, filter.IPFrom, filter.IPFrom, filter.IPTo)
 	}
 	if filter.Severity >= model.AttackSeverityInfo && filter.Severity <= model.AttackSeverityCritical {
 		where += " AND severity = ?"
